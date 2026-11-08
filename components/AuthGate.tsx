@@ -257,11 +257,23 @@ export default function AuthGate({ children }: AuthGateProps) {
         setUser(resolved);
       }
     } catch (err) {
-      setErrorMsg(
+      const rawMsg =
         err instanceof Error
           ? err.message
-          : "Gagal masuk. Periksa kembali email dan password Anda."
-      );
+          : "Gagal masuk. Periksa kembali email dan password Anda.";
+      const lower = rawMsg.toLowerCase();
+
+      if (lower.includes("rate limit")) {
+        setErrorMsg(
+          "Batas pengiriman email konfirmasi Supabase tercapai (Email Rate Limit). Matikan fitur 'Confirm email' di Supabase Dashboard → Authentication → Providers → Email agar bisa mendaftar tanpa batas."
+        );
+      } else if (lower.includes("email not confirmed")) {
+        setErrorMsg(
+          "Email belum dikonfirmasi. Matikan 'Confirm email' di Supabase Dashboard → Authentication → Providers → Email, atau jalankan query konfirmasi otomatis di SQL Editor."
+        );
+      } else {
+        setErrorMsg(rawMsg);
+      }
     } finally {
       setLoading(false);
     }
