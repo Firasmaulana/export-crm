@@ -12,6 +12,7 @@ import {
 import {
   deleteBuyerRecord,
   fetchAllBuyers,
+  supabase,
   updateBuyerStatusOrNotes,
 } from "@/lib/supabase";
 import {
@@ -85,6 +86,36 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
 
   useEffect(() => {
     loadBuyers();
+
+    // Sinkronisasi otomatis lintas perangkat (Realtime & saat tab kembali aktif)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        loadBuyers();
+      }
+    };
+    window.addEventListener("visibilitychange", handleVisibility);
+
+    let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
+      null;
+    if (supabase) {
+      channel = supabase
+        .channel("buyers-realtime-sync")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "buyers" },
+          () => {
+            loadBuyers();
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      window.removeEventListener("visibilitychange", handleVisibility);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
   const uniqueCountries = useMemo(() => {
