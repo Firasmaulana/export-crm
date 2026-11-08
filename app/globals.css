@@ -1,0 +1,236 @@
+@import "tailwindcss";
+
+:root {
+  --ee: cubic-bezier(0.19, 1, 0.22, 1);
+  --bg: #0a0e1a;
+  --bg-2: #0d1220;
+  --ink: #ffffff;
+  --ink-2: rgba(255, 255, 255, 0.72);
+  --ink-3: rgba(255, 255, 255, 0.48);
+  --ink-4: rgba(255, 255, 255, 0.28);
+  --line: rgba(255, 255, 255, 0.1);
+  --line-2: rgba(255, 255, 255, 0.06);
+  --glass-bg: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.055),
+    rgba(255, 255, 255, 0.018)
+  );
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --indigo: #6366f1;
+  --indigo-soft: #a5b4fc;
+  --pink: #ec4899;
+  --pink-soft: #f9a8d4;
+  --cyan: #22d3ee;
+  --green: #4ade80;
+  --amber: #fbbf24;
+  --grad-a: linear-gradient(135deg, #ffffff 0%, #a5b4fc 50%, #ec4899 100%);
+  --grad-b: linear-gradient(135deg, #6366f1, #ec4899);
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body), sans-serif;
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: var(--font-sans), sans-serif;
+  letter-spacing: -0.025em;
+}
+
+.font-mono-label {
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* Lustro Ambient Background & Subtle Grid */
+.lustro-bg {
+  position: relative;
+  min-height: 100vh;
+  background-color: var(--bg);
+  isolation: isolate;
+}
+
+.lustro-bg::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(
+      circle at 15% 20%,
+      rgba(99, 102, 241, 0.18) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at 85% 80%,
+      rgba(236, 72, 153, 0.12) 0%,
+      transparent 50%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      rgba(34, 211, 238, 0.06) 0%,
+      transparent 60%
+    );
+  z-index: -2;
+  pointer-events: none;
+}
+
+.lustro-bg::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: linear-gradient(
+      rgba(255, 255, 255, 0.022) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse at center, black 25%, transparent 80%);
+  -webkit-mask-image: radial-gradient(
+    ellipse at center,
+    black 25%,
+    transparent 80%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Lustro Glass Card */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+}
+
+.text-grad {
+  background: var(--grad-a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lustro-logo {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--grad-b);
+  position: relative;
+  flex-shrink: 0;
+}
+
+.lustro-logo::after {
+  content: "";
+  position: absolute;
+  inset: 5px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+
+/* Lustro Buttons */
+.btn-lustro-primary {
+  background: #ffffff;
+  color: #0a0e1a;
+  padding: 10px 20px;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.25s var(--ee);
+  border: none;
+}
+
+.btn-lustro-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--indigo-soft), #ffffff);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(165, 180, 252, 0.22);
+}
+
+.btn-lustro-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  color: var(--ink);
+  padding: 10px 18px;
+  border-radius: 100px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.25s var(--ee);
+  border: 1px solid var(--glass-border);
+}
+
+.btn-lustro-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Inputs & Selects */
+.input-lustro {
+  background: rgba(13, 18, 32, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #ffffff;
+  font-size: 13.5px;
+  padding: 10px 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.input-lustro::placeholder {
+  color: rgba(255, 255, 255, 0.32);
+}
+
+.input-lustro:focus {
+  outline: none;
+  border-color: rgba(165, 180, 252, 0.55);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+/* Native Modal Dialogs */
+dialog.lustro-dialog {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 24, 42, 0.97) 0%,
+    rgba(13, 18, 32, 0.98) 100%
+  );
+  backdrop-filter: blur(40px);
+  -webkit-backdrop-filter: blur(40px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 24px;
+  color: var(--ink);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6),
+    0 0 60px rgba(99, 102, 241, 0.12);
+}
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(10, 14, 26, 0.68);
+  backdrop-filter: blur(8px);
+}
+
+.table-wrapper {
+  container-type: inline-size;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(165, 180, 252, 0.3) transparent;
+}
