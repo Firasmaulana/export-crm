@@ -32,42 +32,51 @@ export default function AuthGate({ children }: AuthGateProps) {
   useEffect(() => {
     let mounted = true;
 
-    async function checkSession() {
-      if (isSupabaseConfigured && supabase) {
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
-        }
-        const { data } = await supabase.auth.getSession();
-        if (mounted && data.session?.user) {
-          const u = data.session.user;
-          setUser({
-            email: u.email || "user@internal.team",
-            name:
-              (u.user_metadata?.full_name as string) ||
-              u.email?.split("@")[0] ||
-              "Internal Team",
-            mode: "supabase",
-          });
-        }
-        if (mounted) setInitializing(false);
-        return;
-      }
+    // Safety timeout agar tidak pernah tertahan di state loading
+    const safetyTimer = setTimeout(() => {
+      if (mounted) setInitializing(false);
+    }, 1500);
 
-      if (typeof window !== "undefined") {
-        const saved = window.localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved) as AuthenticatedUser;
-            if (parsed && parsed.email) {
-              if (mounted) setUser(parsed);
+    async function checkSession() {
+      try {
+        if (isSupabaseConfigured && supabase) {
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+          }
+          const { data } = await supabase.auth.getSession();
+          if (mounted && data?.session?.user) {
+            const u = data.session.user;
+            setUser({
+              email: u.email || "user@internal.team",
+              name:
+                (u.user_metadata?.full_name as string) ||
+                u.email?.split("@")[0] ||
+                "Internal Team",
+              mode: "supabase",
+            });
+          }
+          return;
+        }
+
+        if (typeof window !== "undefined") {
+          const saved = window.localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as AuthenticatedUser;
+              if (parsed && parsed.email) {
+                if (mounted) setUser(parsed);
+              }
+            } catch {
+              // ignore
             }
-          } catch {
-            // ignore
           }
         }
+      } catch (err) {
+        console.warn("Session check warning:", err);
+      } finally {
+        clearTimeout(safetyTimer);
+        if (mounted) setInitializing(false);
       }
-
-      if (mounted) setInitializing(false);
     }
 
     checkSession();
@@ -185,14 +194,6 @@ export default function AuthGate({ children }: AuthGateProps) {
       setLoading(false);
     }
   };
-
-  if (initializing) {
-    return (
-      <div className="lustro-bg flex items-center justify-center p-6">
-        <div className="font-mono-label text-white/50">LOADING...</div>
-      </div>
-    );
-  }
 
   if (user) {
     return <>{children(user, handleSignOut)}</>;
