@@ -193,10 +193,28 @@ export default function AuthGate({ children }: AuthGateProps) {
     try {
       if (isSupabaseConfigured && supabase) {
         if (authTab === "signin") {
-          const { data, error } = await supabase.auth.signInWithPassword({
+          let { data, error } = await supabase.auth.signInWithPassword({
             email: cleanEmail,
             password,
           });
+
+          // Jika email belum terkonfirmasi karena daftar saat Confirm Email masih ON,
+          // coba konfirmasi otomatis lewat fungsi RPC database lalu login ulang
+          if (
+            error &&
+            error.message.toLowerCase().includes("email not confirmed")
+          ) {
+            await supabase.rpc("confirm_user_email_direct", {
+              p_email: cleanEmail,
+            });
+            const retry = await supabase.auth.signInWithPassword({
+              email: cleanEmail,
+              password,
+            });
+            data = retry.data;
+            error = retry.error;
+          }
+
           if (error) throw error;
           if (data.user) {
             const resolved = await resolveUserWithApproval({
@@ -210,12 +228,41 @@ export default function AuthGate({ children }: AuthGateProps) {
             setUser(resolved);
           }
         } else {
+          const displayName = fullName.trim() || cleanEmail.split("@")[0];
+
+          // Coba daftar langsung lewat fungsi RPC database (bebas Email Rate Limit 100%)
+          const { error: rpcErr } = await supabase.rpc("register_user_direct", {
+            p_email: cleanEmail,
+            p_password: password,
+            p_full_name: displayName,
+          });
+
+          if (!rpcErr) {
+            const { data: signInData, error: signInErr } =
+              await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password,
+              });
+            if (signInErr) throw signInErr;
+            if (signInData.user) {
+              const resolved = await resolveUserWithApproval({
+                userId: signInData.user.id,
+                email: signInData.user.email || cleanEmail,
+                name: displayName,
+                mode: "supabase",
+              });
+              setUser(resolved);
+              return;
+            }
+          }
+
+          // Fallback ke signUp standar jika RPC belum dijalankan di SQL Editor
           const { data, error } = await supabase.auth.signUp({
             email: cleanEmail,
             password,
             options: {
               data: {
-                full_name: fullName.trim() || cleanEmail.split("@")[0],
+                full_name: displayName,
               },
             },
           });
@@ -224,16 +271,15 @@ export default function AuthGate({ children }: AuthGateProps) {
             const resolved = await resolveUserWithApproval({
               userId: data.session.user.id,
               email: data.session.user.email || cleanEmail,
-              name: fullName.trim() || cleanEmail.split("@")[0],
+              name: displayName,
               mode: "supabase",
             });
             setUser(resolved);
           } else {
-            // Daftarkan juga ke team_members jika memungkinkan
             await resolveUserWithApproval({
               userId: data.user?.id,
               email: cleanEmail,
-              name: fullName.trim() || cleanEmail.split("@")[0],
+              name: displayName,
               mode: "supabase",
             });
             setInfoMsg(

@@ -168,6 +168,109 @@ CREATE TRIGGER on_auth_user_created_team_member
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_auth_user();
 
+-- Fungsi Pendaftaran Langsung Tanpa Email Rate Limit Supabase (register_user_direct)
+CREATE OR REPLACE FUNCTION public.register_user_direct(
+  p_email TEXT,
+  p_password TEXT,
+  p_full_name TEXT DEFAULT ''
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth, extensions
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_clean_email TEXT := LOWER(TRIM(p_email));
+  v_name TEXT := COALESCE(NULLIF(TRIM(p_full_name), ''), split_part(v_clean_email, '@', 1));
+BEGIN
+  SELECT id INTO v_user_id FROM auth.users WHERE LOWER(email) = v_clean_email LIMIT 1;
+
+  IF v_user_id IS NOT NULL THEN
+    UPDATE auth.users
+    SET
+      email_confirmed_at = COALESCE(email_confirmed_at, now()),
+      encrypted_password = extensions.crypt(p_password, extensions.gen_salt('bf')),
+      updated_at = now()
+    WHERE id = v_user_id;
+    RETURN v_user_id;
+  END IF;
+
+  v_user_id := extensions.gen_random_uuid();
+
+  INSERT INTO auth.users (
+    instance_id,
+    id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at,
+    confirmation_token,
+    email_change,
+    email_change_token_new,
+    recovery_token
+  ) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    v_user_id,
+    'authenticated',
+    'authenticated',
+    v_clean_email,
+    extensions.crypt(p_password, extensions.gen_salt('bf')),
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    jsonb_build_object('full_name', v_name),
+    now(),
+    now(),
+    '',
+    '',
+    '',
+    ''
+  );
+
+  INSERT INTO auth.identities (
+    id,
+    user_id,
+    provider_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  ) VALUES (
+    extensions.gen_random_uuid(),
+    v_user_id,
+    v_user_id::text,
+    jsonb_build_object('sub', v_user_id::text, 'email', v_clean_email, 'email_verified', true),
+    'email',
+    now(),
+    now(),
+    now()
+  );
+
+  RETURN v_user_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.register_user_direct(TEXT, TEXT, TEXT) TO anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.confirm_user_email_direct(p_email TEXT)
+RETURNS VOID
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  UPDATE auth.users
+  SET email_confirmed_at = COALESCE(email_confirmed_at, now())
+  WHERE LOWER(email) = LOWER(TRIM(p_email));
+$$;
+
+GRANT EXECUTE ON FUNCTION public.confirm_user_email_direct(TEXT) TO anon, authenticated;
+
 -- Fungsi helper SECURITY DEFINER untuk mengecek status ACC user yang sedang login
 CREATE OR REPLACE FUNCTION public.is_approved_member()
 RETURNS BOOLEAN
