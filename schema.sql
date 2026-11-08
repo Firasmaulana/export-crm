@@ -271,6 +271,63 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.confirm_user_email_direct(TEXT) TO anon, authenticated;
 
+-- Fungsi & Trigger Hapus Akun Permanen (Hapus dari team_members sekaligus auth.users)
+CREATE OR REPLACE FUNCTION public.handle_deleted_team_member()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  DELETE FROM auth.identities
+  WHERE user_id IN (
+    SELECT id FROM auth.users WHERE LOWER(email) = LOWER(OLD.email)
+  );
+  DELETE FROM auth.users
+  WHERE LOWER(email) = LOWER(OLD.email);
+  RETURN OLD;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_team_member_deleted_auth_user ON public.team_members;
+CREATE TRIGGER on_team_member_deleted_auth_user
+  AFTER DELETE ON public.team_members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_deleted_team_member();
+
+CREATE OR REPLACE FUNCTION public.admin_delete_user_account(
+  p_member_id UUID,
+  p_email TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  IF NOT public.is_admin_member() THEN
+    RAISE EXCEPTION 'Hanya Admin yang dapat menghapus akun anggota tim.';
+  END IF;
+
+  IF LOWER(TRIM(p_email)) = LOWER(COALESCE(auth.jwt()->>'email', '')) THEN
+    RAISE EXCEPTION 'Anda tidak dapat menghapus akun Admin Anda sendiri.';
+  END IF;
+
+  DELETE FROM public.team_members
+  WHERE id = p_member_id OR LOWER(email) = LOWER(TRIM(p_email));
+
+  DELETE FROM auth.identities
+  WHERE user_id IN (
+    SELECT id FROM auth.users WHERE LOWER(email) = LOWER(TRIM(p_email))
+  );
+
+  DELETE FROM auth.users
+  WHERE LOWER(email) = LOWER(TRIM(p_email));
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.admin_delete_user_account(UUID, TEXT) TO authenticated;
+
 -- Fungsi helper SECURITY DEFINER untuk mengecek status ACC user yang sedang login
 CREATE OR REPLACE FUNCTION public.is_approved_member()
 RETURNS BOOLEAN

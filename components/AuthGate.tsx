@@ -52,12 +52,14 @@ export default function AuthGate({ children }: AuthGateProps) {
       email: string;
       name: string;
       mode: "supabase" | "local";
-    }): Promise<AuthenticatedUser> => {
+      onlyCheckExisting?: boolean;
+    }): Promise<AuthenticatedUser | null> => {
       try {
         const member = await ensureAndGetTeamMember({
           userId: params.userId,
           email: params.email,
           fullName: params.name,
+          onlyCheckExisting: params.onlyCheckExisting,
         });
         return {
           email: params.email,
@@ -66,7 +68,20 @@ export default function AuthGate({ children }: AuthGateProps) {
           role: member.role,
           status: member.status,
         };
-      } catch {
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          err.message === "ACCOUNT_DELETED_BY_ADMIN"
+        ) {
+          if (isSupabaseConfigured && supabase) {
+            await supabase.auth.signOut();
+          }
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+          }
+          setErrorMsg("Akun ini telah dihapus oleh Admin.");
+          return null;
+        }
         return {
           email: params.email,
           name: params.name,
@@ -104,6 +119,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 u.email?.split("@")[0] ||
                 "Internal Team",
               mode: "supabase",
+              onlyCheckExisting: true,
             });
             if (mounted) setUser(resolved);
           }
@@ -333,6 +349,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         email: user.email,
         name: user.name,
         mode: user.mode,
+        onlyCheckExisting: true,
       });
       setUser(updated);
     } finally {

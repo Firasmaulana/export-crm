@@ -109,7 +109,12 @@ export default function TeamApprovalModal({
   const [tableMissing, setTableMissing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
+    null
+  );
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
@@ -199,17 +204,22 @@ export default function TeamApprovalModal({
       setErrorMsg("Anda tidak dapat menghapus akun Anda sendiri.");
       return;
     }
-    if (!window.confirm(`Hapus akses untuk ${member.email}?`)) return;
     setErrorMsg(null);
+    setSuccessMsg(null);
+    setDeletingId(member.id);
     try {
-      await deleteTeamMember(member.id);
+      await deleteTeamMember(member.id, member.email);
       const next = members.filter((m) => m.id !== member.id);
       setMembers(next);
       onMembersChanged?.(next);
+      setConfirmingDeleteId(null);
+      setSuccessMsg(`Akun ${member.email} berhasil dihapus permanen.`);
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : "Gagal menghapus anggota."
       );
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -280,6 +290,12 @@ export default function TeamApprovalModal({
         {errorMsg && (
           <div className="px-4 py-3 rounded-xl bg-rose-500/12 border border-rose-400/25 text-rose-200">
             {errorMsg}
+          </div>
+        )}
+
+        {successMsg && (
+          <div className="px-4 py-3 rounded-xl bg-emerald-500/12 border border-emerald-400/25 text-emerald-200">
+            {successMsg}
           </div>
         )}
 
@@ -357,7 +373,7 @@ export default function TeamApprovalModal({
                       </div>
 
                       {isAdmin && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <button
                             type="button"
                             onClick={() => handleStatusChange(m, "approved")}
@@ -369,11 +385,43 @@ export default function TeamApprovalModal({
                           <button
                             type="button"
                             onClick={() => handleStatusChange(m, "rejected")}
-                            className="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/30 text-rose-200 inline-flex items-center gap-1.5 transition cursor-pointer"
+                            className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/30 text-amber-200 inline-flex items-center gap-1.5 transition cursor-pointer"
                           >
                             <UserX className="w-3.5 h-3.5" />
                             <span>Tolak</span>
                           </button>
+
+                          {confirmingDeleteId === m.id ? (
+                            <div className="inline-flex items-center gap-1.5 bg-rose-500/20 border border-rose-400/40 px-2.5 py-1 rounded-lg">
+                              <span className="text-rose-200 text-[11px]">
+                                Hapus permanen?
+                              </span>
+                              <button
+                                type="button"
+                                disabled={deletingId === m.id}
+                                onClick={() => handleDelete(m)}
+                                className="px-2 py-0.5 rounded bg-rose-500 hover:bg-rose-600 text-white font-medium text-[11px] cursor-pointer"
+                              >
+                                {deletingId === m.id ? "Menghapus..." : "Ya"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingDeleteId(null)}
+                                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-[11px] cursor-pointer"
+                              >
+                                Batal
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmingDeleteId(m.id)}
+                              className="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/30 text-rose-200 inline-flex items-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus Akun</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -509,14 +557,38 @@ export default function TeamApprovalModal({
                                 : "Jadikan Admin"}
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(m)}
-                              aria-label={`Hapus ${m.email}`}
-                              className="p-1.5 rounded-lg bg-white/5 hover:bg-rose-500/20 text-white/50 hover:text-rose-200 transition cursor-pointer"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {confirmingDeleteId === m.id ? (
+                              <div className="inline-flex items-center gap-1.5 bg-rose-500/20 border border-rose-400/40 px-2.5 py-1 rounded-lg">
+                                <span className="text-rose-200 text-[11px]">
+                                  Hapus permanen?
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={deletingId === m.id}
+                                  onClick={() => handleDelete(m)}
+                                  className="px-2 py-0.5 rounded bg-rose-500 hover:bg-rose-600 text-white font-medium text-[11px] cursor-pointer"
+                                >
+                                  {deletingId === m.id ? "Menghapus..." : "Ya"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmingDeleteId(null)}
+                                  className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white/80 text-[11px] cursor-pointer"
+                                >
+                                  Batal
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmingDeleteId(m.id)}
+                                aria-label={`Hapus ${m.email}`}
+                                className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/30 text-rose-200 text-[11px] inline-flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Hapus Akun</span>
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>

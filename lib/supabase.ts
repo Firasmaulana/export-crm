@@ -584,6 +584,7 @@ export async function ensureAndGetTeamMember(params: {
   userId?: string;
   email: string;
   fullName?: string;
+  onlyCheckExisting?: boolean;
 }): Promise<TeamMemberRecord> {
   const cleanEmail = params.email.trim().toLowerCase();
   const displayName = (params.fullName || cleanEmail.split("@")[0] || "Team").trim();
@@ -639,6 +640,13 @@ export async function ensureAndGetTeamMember(params: {
     }
 
     const isFirstAdmin = (count ?? 0) === 0;
+
+    // Jika sedang mengecek sesi lama (bukan klik Sign Up baru) dan baris sudah tidak ada,
+    // berarti akun ini telah dihapus oleh Admin! Jangan re-insert kembali.
+    if (params.onlyCheckExisting && !isFirstAdmin) {
+      throw new Error("ACCOUNT_DELETED_BY_ADMIN");
+    }
+
     const role: TeamMemberRole = isFirstAdmin ? "admin" : "member";
     const status: TeamMemberStatus = isFirstAdmin ? "approved" : "pending";
 
@@ -785,10 +793,38 @@ export async function preApproveTeamMemberEmail(params: {
   return newMember;
 }
 
-export async function deleteTeamMember(id: string): Promise<void> {
+export async function deleteTeamMember(
+  id: string,
+  email?: string
+): Promise<void> {
   if (supabase) {
-    const { error } = await supabase.from("team_members").delete().eq("id", id);
+    // 1. Coba hapus permanen dari team_members sekaligus auth.users lewat RPC
+    if (email) {
+      const { error: rpcErr } = await supabase.rpc(
+        "admin_delete_user_account",
+        {
+          p_member_id: id,
+          p_email: email.trim().toLowerCase(),
+        }
+      );
+      if (!rpcErr) {
+        return;
+      }
+    }
+
+    // 2. Fallback hapus dari tabel public.team_members & verifikasi baris terhapus
+    const { data: deletedRows, error } = await supabase
+      .from("team_members")
+      .delete()
+      .eq("id", id)
+      .select("id");
+
     if (error) throw new Error(error.message);
+    if (!deletedRows || deletedRows.length === 0) {
+      throw new Error(
+        "Gagal menghapus akun. Pastikan akun Anda berstatus ADMIN dan policy DELETE sudah aktif di Supabase SQL Editor."
+      );
+    }
     return;
   }
 
