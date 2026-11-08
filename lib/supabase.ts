@@ -8,8 +8,14 @@ import {
 } from "./deduplication";
 import { INITIAL_DEDUPLICATED_BUYERS } from "./seed-data";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+const rawSupabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim();
+// Sanitize URL jika user menyalin endpoint '/rest/v1/' dari Supabase Settings
+const supabaseUrl = rawSupabaseUrl
+  .replace(/\/rest\/v1\/?$/i, "")
+  .replace(/\/+$/, "");
+const supabaseAnonKey = (
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ""
+).trim();
 
 export const isSupabaseConfigured =
   Boolean(supabaseUrl) &&
