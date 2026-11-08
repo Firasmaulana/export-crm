@@ -10,6 +10,7 @@ import {
   SECTORS,
 } from "@/lib/constants";
 import {
+  deleteAllBuyers,
   deleteBuyerRecord,
   fetchAllBuyers,
   fetchAllTeamMembers,
@@ -356,6 +357,26 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     }
   };
 
+  const handleDeleteAllBuyers = async () => {
+    if (buyers.length === 0) return;
+    const confirmed = window.confirm(
+      `Yakin ingin menghapus SEMUA (${buyers.length}) data buyer dari database secara permanen?`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteAllBuyers();
+      setBuyers([]);
+      showToast("Seluruh data buyer berhasil dihapus.");
+    } catch (err) {
+      showToast(
+        err instanceof Error
+          ? err.message
+          : "Gagal menghapus seluruh data buyer."
+      );
+    }
+  };
+
   return (
     <div className="lustro-bg min-h-screen flex flex-col">
       {/* Minimal Lustro Top Chrome */}
@@ -430,6 +451,18 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               <Plus className="w-4 h-4" />
               <span>New Buyer</span>
             </button>
+
+            {buyers.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteAllBuyers}
+                title="Hapus seluruh data buyer di tabel"
+                className="btn-lustro-secondary text-rose-300 hover:text-rose-200"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden xl:inline">Hapus Semua</span>
+              </button>
+            )}
 
             <div className="h-5 w-[1px] bg-white/10 mx-1 hidden sm:block" />
 

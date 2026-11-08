@@ -42,7 +42,7 @@ function getLocalBuyers(): BuyerRecord[] {
       return INITIAL_DEDUPLICATED_BUYERS;
     }
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) {
+    if (Array.isArray(parsed)) {
       return parsed;
     }
     return INITIAL_DEDUPLICATED_BUYERS;
@@ -69,47 +69,6 @@ export async function fetchAllBuyers(): Promise<BuyerRecord[]> {
 
     if (error) {
       throw new Error(error.message);
-    }
-
-    // Jika tabel di Supabase masih kosong saat user yang sudah login membuka dashboard,
-    // otomatis isi dengan 21 data awal hasil deduplikasi database.xlsx
-    if (data && data.length === 0) {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (sessionData?.session) {
-        const seedPayload = INITIAL_DEDUPLICATED_BUYERS.map((b) => ({
-          company_name: b.company_name,
-          normalized_name: b.normalized_name,
-          company_domain: b.company_domain,
-          country: b.country,
-          city: b.city,
-          website: b.website,
-          email: b.email,
-          pic_name: b.pic_name,
-          linkedin_url: b.linkedin_url,
-          social_media: b.social_media,
-          sectors: b.sectors,
-          product_tags: b.product_tags,
-          pipeline_status: b.pipeline_status,
-          notes: b.notes,
-          created_by: b.created_by,
-        }));
-
-        const { data: seededData, error: seedError } = await supabase
-          .from("buyers")
-          .upsert(seedPayload, { onConflict: "normalized_name" })
-          .select("*")
-          .order("updated_at", { ascending: false });
-
-        if (!seedError && seededData && seededData.length > 0) {
-          return seededData.map((row) => ({
-            ...row,
-            sectors: Array.isArray(row.sectors) ? row.sectors : [],
-            product_tags: Array.isArray(row.product_tags)
-              ? row.product_tags
-              : [],
-          })) as BuyerRecord[];
-        }
-      }
     }
 
     return (data || []).map((row) => ({
@@ -518,6 +477,19 @@ export async function deleteBuyerRecord(id: string): Promise<void> {
 
   const current = getLocalBuyers();
   saveLocalBuyers(current.filter((b) => b.id !== id));
+}
+
+export async function deleteAllBuyers(): Promise<void> {
+  if (supabase) {
+    const { error } = await supabase
+      .from("buyers")
+      .delete()
+      .not("id", "is", null);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  saveLocalBuyers([]);
 }
 
 // ============================================================================
