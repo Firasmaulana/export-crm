@@ -198,6 +198,20 @@ AS $$
   );
 $$;
 
+CREATE OR REPLACE FUNCTION public.has_any_admin()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.team_members
+    WHERE role = 'admin'
+      AND status = 'approved'
+  );
+$$;
+
 ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Team members select policy" ON public.team_members;
@@ -208,7 +222,7 @@ CREATE POLICY "Team members select policy"
   USING (
     LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
     OR public.is_approved_member()
-    OR NOT EXISTS (SELECT 1 FROM public.team_members WHERE role = 'admin')
+    OR NOT public.has_any_admin()
   );
 
 DROP POLICY IF EXISTS "Team members insert policy" ON public.team_members;

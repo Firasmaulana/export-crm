@@ -567,9 +567,11 @@ function isTableMissingError(error: { code?: string; message?: string } | null):
   const msg = (error.message || "").toLowerCase();
   return (
     error.code === "42P01" ||
+    error.code === "42P17" ||
     error.code === "PGRST205" ||
-    msg.includes("team_members") &&
-      (msg.includes("does not exist") || msg.includes("schema cache"))
+    msg.includes("infinite recursion") ||
+    (msg.includes("team_members") &&
+      (msg.includes("does not exist") || msg.includes("schema cache")))
   );
 }
 
@@ -642,18 +644,15 @@ export async function ensureAndGetTeamMember(params: {
 
     const { data: inserted, error: insertErr } = await supabase
       .from("team_members")
-      .upsert(
-        [
-          {
-            user_id: params.userId || null,
-            email: cleanEmail,
-            full_name: displayName,
-            role,
-            status,
-          },
-        ],
-        { onConflict: "email" }
-      )
+      .insert([
+        {
+          user_id: params.userId || null,
+          email: cleanEmail,
+          full_name: displayName,
+          role,
+          status,
+        },
+      ])
       .select("*")
       .single();
 
