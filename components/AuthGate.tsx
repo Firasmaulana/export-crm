@@ -1,13 +1,29 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { Eye, EyeOff, ArrowRight } from "lucide-react";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  ensureAndGetTeamMember,
+  isSupabaseConfigured,
+  supabase,
+  TeamMemberRole,
+  TeamMemberStatus,
+} from "@/lib/supabase";
+import {
+  Eye,
+  EyeOff,
+  ArrowRight,
+  Clock,
+  ShieldAlert,
+  RefreshCw,
+  LogOut,
+} from "lucide-react";
 
 export interface AuthenticatedUser {
   email: string;
   name: string;
   mode: "supabase" | "local";
+  role: TeamMemberRole;
+  status: TeamMemberStatus;
 }
 
 interface AuthGateProps {
@@ -26,8 +42,42 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkingApproval, setCheckingApproval] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  const resolveUserWithApproval = useCallback(
+    async (params: {
+      userId?: string;
+      email: string;
+      name: string;
+      mode: "supabase" | "local";
+    }): Promise<AuthenticatedUser> => {
+      try {
+        const member = await ensureAndGetTeamMember({
+          userId: params.userId,
+          email: params.email,
+          fullName: params.name,
+        });
+        return {
+          email: params.email,
+          name: member.full_name || params.name,
+          mode: params.mode,
+          role: member.role,
+          status: member.status,
+        };
+      } catch {
+        return {
+          email: params.email,
+          name: params.name,
+          mode: params.mode,
+          role: "member",
+          status: "pending",
+        };
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -46,7 +96,8 @@ export default function AuthGate({ children }: AuthGateProps) {
           const { data } = await supabase.auth.getSession();
           if (mounted && data?.session?.user) {
             const u = data.session.user;
-            setUser({
+            const resolved = await resolveUserWithApproval({
+              userId: u.id,
               email: u.email || "user@internal.team",
               name:
                 (u.user_metadata?.full_name as string) ||
@@ -54,6 +105,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 "Internal Team",
               mode: "supabase",
             });
+            if (mounted) setUser(resolved);
           }
           return;
         }
@@ -64,7 +116,12 @@ export default function AuthGate({ children }: AuthGateProps) {
             try {
               const parsed = JSON.parse(saved) as AuthenticatedUser;
               if (parsed && parsed.email) {
-                if (mounted) setUser(parsed);
+                const resolved = await resolveUserWithApproval({
+                  email: parsed.email,
+                  name: parsed.name,
+                  mode: "local",
+                });
+                if (mounted) setUser(resolved);
               }
             } catch {
               // ignore
@@ -83,9 +140,10 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     if (isSupabaseConfigured && supabase) {
       const { data: listener } = supabase.auth.onAuthStateChange(
-        (_event, session) => {
+        async (_event, session) => {
           if (session?.user) {
-            setUser({
+            const resolved = await resolveUserWithApproval({
+              userId: session.user.id,
               email: session.user.email || "user@internal.team",
               name:
                 (session.user.user_metadata?.full_name as string) ||
@@ -93,8 +151,9 @@ export default function AuthGate({ children }: AuthGateProps) {
                 "Internal Team",
               mode: "supabase",
             });
+            if (mounted) setUser(resolved);
           } else {
-            setUser(null);
+            if (mounted) setUser(null);
           }
         }
       );
@@ -107,7 +166,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [resolveUserWithApproval]);
 
   const handleSignOut = async () => {
     if (isSupabaseConfigured && supabase) {
@@ -140,13 +199,15 @@ export default function AuthGate({ children }: AuthGateProps) {
           });
           if (error) throw error;
           if (data.user) {
-            setUser({
+            const resolved = await resolveUserWithApproval({
+              userId: data.user.id,
               email: data.user.email || cleanEmail,
               name:
                 (data.user.user_metadata?.full_name as string) ||
                 cleanEmail.split("@")[0],
               mode: "supabase",
             });
+            setUser(resolved);
           }
         } else {
           const { data, error } = await supabase.auth.signUp({
@@ -160,29 +221,40 @@ export default function AuthGate({ children }: AuthGateProps) {
           });
           if (error) throw error;
           if (data.session?.user) {
-            setUser({
+            const resolved = await resolveUserWithApproval({
+              userId: data.session.user.id,
               email: data.session.user.email || cleanEmail,
               name: fullName.trim() || cleanEmail.split("@")[0],
               mode: "supabase",
             });
+            setUser(resolved);
           } else {
-            setInfoMsg("Akun berhasil dibuat. Silakan Sign In.");
+            // Daftarkan juga ke team_members jika memungkinkan
+            await resolveUserWithApproval({
+              userId: data.user?.id,
+              email: cleanEmail,
+              name: fullName.trim() || cleanEmail.split("@")[0],
+              mode: "supabase",
+            });
+            setInfoMsg(
+              "Pendaftaran berhasil dikirim! Akun Anda menunggu persetujuan (ACC) Admin sebelum dapat mengakses database."
+            );
             setAuthTab("signin");
           }
         }
       } else {
-        const localUser: AuthenticatedUser = {
+        const resolved = await resolveUserWithApproval({
           email: cleanEmail,
           name: fullName.trim() || cleanEmail.split("@")[0] || "Team",
           mode: "local",
-        };
+        });
         if (typeof window !== "undefined") {
           window.localStorage.setItem(
             LOCAL_AUTH_STORAGE_KEY,
-            JSON.stringify(localUser)
+            JSON.stringify(resolved)
           );
         }
-        setUser(localUser);
+        setUser(resolved);
       }
     } catch (err) {
       setErrorMsg(
@@ -195,8 +267,114 @@ export default function AuthGate({ children }: AuthGateProps) {
     }
   };
 
+  const handleRefreshApproval = async () => {
+    if (!user) return;
+    setCheckingApproval(true);
+    try {
+      const updated = await resolveUserWithApproval({
+        email: user.email,
+        name: user.name,
+        mode: user.mode,
+      });
+      setUser(updated);
+    } finally {
+      setCheckingApproval(false);
+    }
+  };
+
   if (user) {
-    return <>{children(user, handleSignOut)}</>;
+    if (user.status === "approved") {
+      return <>{children(user, handleSignOut)}</>;
+    }
+
+    const isRejected = user.status === "rejected";
+
+    return (
+      <div className="lustro-bg flex flex-col items-center justify-center min-h-screen px-5 py-12">
+        <div className="mb-8 flex items-center gap-3">
+          <div className="lustro-logo" />
+          <span className="font-display font-semibold text-base tracking-tight text-white">
+            Export CRM <span className="text-indigo-300">/</span>{" "}
+            <span className="text-white/60 font-normal text-sm">
+              Access Control
+            </span>
+          </span>
+        </div>
+
+        <div className="glass-card w-full max-w-[430px] p-8 sm:p-9 shadow-2xl text-center">
+          <div
+            className={`w-12 h-12 rounded-2xl mx-auto mb-5 flex items-center justify-center border ${
+              isRejected
+                ? "bg-rose-500/15 border-rose-400/30 text-rose-300"
+                : "bg-amber-500/15 border-amber-400/30 text-amber-300"
+            }`}
+          >
+            {isRejected ? (
+              <ShieldAlert className="w-6 h-6" />
+            ) : (
+              <Clock className="w-6 h-6" />
+            )}
+          </div>
+
+          <div className="font-mono-label text-indigo-300 mb-2">
+            {isRejected ? "ACCESS REVOKED" : "PENDING ADMIN APPROVAL"}
+          </div>
+
+          <h1 className="font-display text-xl font-medium text-white">
+            {isRejected
+              ? "Akses Akun Ditolak / Dicabut"
+              : "Menunggu Persetujuan (ACC) Admin"}
+          </h1>
+
+          <p className="mt-3 text-xs text-white/60 leading-relaxed">
+            {isRejected ? (
+              <>
+                Maaf, akses untuk akun{" "}
+                <strong className="text-white">{user.email}</strong> telah
+                ditolak atau dicabut oleh Admin Export CRM.
+              </>
+            ) : (
+              <>
+                Akun <strong className="text-white">{user.email}</strong> sudah
+                terdaftar, namun harus{" "}
+                <strong className="text-amber-200">di-ACC terlebih dahulu</strong>{" "}
+                oleh Admin sebelum dapat melihat atau mengelola database Bumi
+                Sari Lokal &amp; Karaya Living.
+              </>
+            )}
+          </p>
+
+          <div className="mt-7 space-y-3">
+            {!isRejected && (
+              <button
+                type="button"
+                onClick={handleRefreshApproval}
+                disabled={checkingApproval}
+                className="btn-lustro-primary w-full py-3"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${checkingApproval ? "animate-spin" : ""}`}
+                />
+                <span>
+                  {checkingApproval
+                    ? "Mengecek status..."
+                    : "Cek Status Persetujuan"}
+                </span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="btn-lustro-secondary w-full py-2.5 justify-center"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Keluar / Ganti Akun</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

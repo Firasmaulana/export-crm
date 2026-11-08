@@ -12,6 +12,7 @@ import {
 import {
   deleteBuyerRecord,
   fetchAllBuyers,
+  fetchAllTeamMembers,
   supabase,
   updateBuyerStatusOrNotes,
 } from "@/lib/supabase";
@@ -25,6 +26,7 @@ import AnalyticsCards from "./AnalyticsCards";
 import BuyerFormModal from "./BuyerFormModal";
 import ExcelImportModal from "./ExcelImportModal";
 import SetupGuideModal from "./SetupGuideModal";
+import TeamApprovalModal from "./TeamApprovalModal";
 import {
   Calendar,
   Download,
@@ -38,6 +40,7 @@ import {
   Settings2,
   Trash2,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 
@@ -65,6 +68,8 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
   const [editingBuyer, setEditingBuyer] = useState<BuyerRecord | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSetupModalOpen, setIsSetupModalOpen] = useState(false);
+  const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
+  const [pendingTeamCount, setPendingTeamCount] = useState(0);
 
   const showToast = (msg: string) => {
     setToastMsg(msg);
@@ -84,13 +89,25 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     }
   };
 
+  const loadPendingTeamCount = async () => {
+    try {
+      const res = await fetchAllTeamMembers();
+      const pending = res.members.filter((m) => m.status === "pending").length;
+      setPendingTeamCount(pending);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     loadBuyers();
+    loadPendingTeamCount();
 
     // Sinkronisasi otomatis lintas perangkat (Realtime & saat tab kembali aktif)
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         loadBuyers();
+        loadPendingTeamCount();
       }
     };
     window.addEventListener("visibilitychange", handleVisibility);
@@ -105,6 +122,13 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
           { event: "*", schema: "public", table: "buyers" },
           () => {
             loadBuyers();
+          }
+        )
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "team_members" },
+          () => {
+            loadPendingTeamCount();
           }
         )
         .subscribe();
@@ -408,6 +432,21 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
             </button>
 
             <div className="h-5 w-[1px] bg-white/10 mx-1 hidden sm:block" />
+
+            <button
+              type="button"
+              onClick={() => setIsTeamModalOpen(true)}
+              title="Kelola Akses Tim & Persetujuan (ACC) Akun"
+              className="btn-lustro-secondary relative"
+            >
+              <Users className="w-3.5 h-3.5 text-amber-300" />
+              <span className="hidden xl:inline">ACC Tim</span>
+              {pendingTeamCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-[#0a0e1a] font-mono font-bold text-[10px]">
+                  {pendingTeamCount}
+                </span>
+              )}
+            </button>
 
             <button
               type="button"
@@ -898,6 +937,18 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
       <SetupGuideModal
         isOpen={isSetupModalOpen}
         onClose={() => setIsSetupModalOpen(false)}
+      />
+
+      <TeamApprovalModal
+        isOpen={isTeamModalOpen}
+        currentUserEmail={user.email}
+        currentUserRole={user.role}
+        onClose={() => setIsTeamModalOpen(false)}
+        onMembersChanged={(members) => {
+          setPendingTeamCount(
+            members.filter((m) => m.status === "pending").length
+          );
+        }}
       />
     </div>
   );

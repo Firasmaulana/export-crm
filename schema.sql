@@ -95,20 +95,161 @@ CREATE TRIGGER trg_buyers_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_updated_at();
 
--- 6. Row Level Security (RLS) untuk Keamanan Tim Internal
+-- 6. Tabel Kontrol Akses Tim & Persetujuan Admin (public.team_members)
+CREATE TABLE IF NOT EXISTS public.team_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID,
+  email TEXT UNIQUE NOT NULL,
+  full_name TEXT DEFAULT '',
+  role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+DROP TRIGGER IF EXISTS trg_team_members_updated_at ON public.team_members;
+CREATE TRIGGER trg_team_members_updated_at
+  BEFORE UPDATE ON public.team_members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_updated_at();
+
+-- Backfill otomatis: jika sudah ada akun di auth.users, daftarkan ke team_members.
+-- Akun pertama (paling awal mendaftar) otomatis menjadi ADMIN & APPROVED.
+INSERT INTO public.team_members (user_id, email, full_name, role, status)
+SELECT
+  u.id,
+  LOWER(u.email),
+  COALESCE(u.raw_user_meta_data->>'full_name', split_part(u.email, '@', 1)),
+  CASE WHEN ROW_NUMBER() OVER (ORDER BY u.created_at ASC) = 1 THEN 'admin' ELSE 'member' END,
+  CASE WHEN ROW_NUMBER() OVER (ORDER BY u.created_at ASC) = 1 THEN 'approved' ELSE 'pending' END
+FROM auth.users u
+WHERE u.email IS NOT NULL
+ON CONFLICT (email) DO NOTHING;
+
+-- Trigger otomatis saat ada orang baru yang Sign Up di Supabase Auth:
+-- Jika belum ada admin sama sekali, pendaftar pertama otomatis jadi Admin (Approved).
+-- Pendaftar berikutnya otomatis berstatus 'pending' (harus di-ACC oleh Admin).
+CREATE OR REPLACE FUNCTION public.handle_new_auth_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  has_admin BOOLEAN;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM public.team_members WHERE role = 'admin' AND status = 'approved'
+  ) INTO has_admin;
+
+  INSERT INTO public.team_members (user_id, email, full_name, role, status)
+  VALUES (
+    NEW.id,
+    LOWER(NEW.email),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
+    CASE WHEN NOT has_admin THEN 'admin' ELSE 'member' END,
+    CASE WHEN NOT has_admin THEN 'approved' ELSE 'pending' END
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    user_id = EXCLUDED.user_id,
+    full_name = CASE
+      WHEN public.team_members.full_name = '' THEN EXCLUDED.full_name
+      ELSE public.team_members.full_name
+    END,
+    updated_at = now();
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS on_auth_user_created_team_member ON auth.users;
+CREATE TRIGGER on_auth_user_created_team_member
+  AFTER INSERT ON auth.users
+  FOR EACH ROW
+  EXECUTE FUNCTION public.handle_new_auth_user();
+
+-- Fungsi helper SECURITY DEFINER untuk mengecek status ACC user yang sedang login
+CREATE OR REPLACE FUNCTION public.is_approved_member()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.team_members
+    WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+      AND status = 'approved'
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_admin_member()
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.team_members
+    WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+      AND role = 'admin'
+      AND status = 'approved'
+  );
+$$;
+
+ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Team members select policy" ON public.team_members;
+CREATE POLICY "Team members select policy"
+  ON public.team_members
+  FOR SELECT
+  TO authenticated
+  USING (
+    LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+    OR public.is_approved_member()
+    OR NOT EXISTS (SELECT 1 FROM public.team_members WHERE role = 'admin')
+  );
+
+DROP POLICY IF EXISTS "Team members insert policy" ON public.team_members;
+CREATE POLICY "Team members insert policy"
+  ON public.team_members
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (
+    LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+    OR public.is_admin_member()
+  );
+
+DROP POLICY IF EXISTS "Team members update policy" ON public.team_members;
+CREATE POLICY "Team members update policy"
+  ON public.team_members
+  FOR UPDATE
+  TO authenticated
+  USING (public.is_admin_member())
+  WITH CHECK (public.is_admin_member());
+
+DROP POLICY IF EXISTS "Team members delete policy" ON public.team_members;
+CREATE POLICY "Team members delete policy"
+  ON public.team_members
+  FOR DELETE
+  TO authenticated
+  USING (public.is_admin_member());
+
+-- Row Level Security (RLS) pada tabel buyers:
+-- HANYA user yang sudah berstatus APPROVED di team_members yang dapat mengakses data buyer!
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;
 
--- Policy: Hanya user yang sudah login (authenticated via Supabase Auth)
--- yang dapat membaca, menambah, mengubah, dan menghapus data buyer
 DROP POLICY IF EXISTS "Allow authenticated full access to buyers" ON public.buyers;
 DROP POLICY IF EXISTS "Allow anon internal access to buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved team members access to buyers" ON public.buyers;
 
-CREATE POLICY "Allow authenticated full access to buyers"
+CREATE POLICY "Allow approved team members access to buyers"
   ON public.buyers
   FOR ALL
   TO authenticated
-  USING (true)
-  WITH CHECK (true);
+  USING (public.is_approved_member())
+  WITH CHECK (public.is_approved_member());
 
 -- ============================================================================
 -- 7. INITIAL SEED DATA (Hasil Deduplikasi Otomatis dari database.xlsx)

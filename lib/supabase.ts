@@ -519,3 +519,280 @@ export async function deleteBuyerRecord(id: string): Promise<void> {
   const current = getLocalBuyers();
   saveLocalBuyers(current.filter((b) => b.id !== id));
 }
+
+// ============================================================================
+// SISTEM PERSETUJUAN AKUN TIM (ADMIN APPROVAL / ACC SYSTEM)
+// ============================================================================
+
+export type TeamMemberRole = "admin" | "member";
+export type TeamMemberStatus = "pending" | "approved" | "rejected";
+
+export interface TeamMemberRecord {
+  id: string;
+  user_id?: string | null;
+  email: string;
+  full_name: string;
+  role: TeamMemberRole;
+  status: TeamMemberStatus;
+  created_at: string;
+  updated_at: string;
+  tableMissing?: boolean;
+}
+
+const LOCAL_TEAM_STORAGE_KEY = "b2b_export_crm_team_members_v1";
+
+function getLocalTeamMembers(): TeamMemberRecord[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LOCAL_TEAM_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalTeamMembers(members: TeamMemberRecord[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LOCAL_TEAM_STORAGE_KEY, JSON.stringify(members));
+  } catch {
+    // ignore
+  }
+}
+
+function isTableMissingError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message || "").toLowerCase();
+  return (
+    error.code === "42P01" ||
+    error.code === "PGRST205" ||
+    msg.includes("team_members") &&
+      (msg.includes("does not exist") || msg.includes("schema cache"))
+  );
+}
+
+/**
+ * Mengecek atau mendaftarkan user yang baru login/signup ke tabel team_members.
+ * - Akun pertama yang terdaftar otomatis menjadi Admin & Approved.
+ * - Akun berikutnya otomatis berstatus 'pending' (harus di-ACC oleh Admin).
+ */
+export async function ensureAndGetTeamMember(params: {
+  userId?: string;
+  email: string;
+  fullName?: string;
+}): Promise<TeamMemberRecord> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  const displayName = (params.fullName || cleanEmail.split("@")[0] || "Team").trim();
+  const nowIso = new Date().toISOString();
+
+  if (supabase) {
+    const { data: existing, error: selectErr } = await supabase
+      .from("team_members")
+      .select("*")
+      .eq("email", cleanEmail)
+      .maybeSingle();
+
+    if (selectErr) {
+      if (isTableMissingError(selectErr)) {
+        return {
+          id: "legacy-owner",
+          user_id: params.userId || null,
+          email: cleanEmail,
+          full_name: displayName,
+          role: "admin",
+          status: "approved",
+          created_at: nowIso,
+          updated_at: nowIso,
+          tableMissing: true,
+        };
+      }
+      throw new Error(selectErr.message);
+    }
+
+    if (existing) {
+      return existing as TeamMemberRecord;
+    }
+
+    // Cek apakah sudah ada admin yang approved di tabel team_members
+    const { count, error: countErr } = await supabase
+      .from("team_members")
+      .select("id", { count: "exact", head: true })
+      .eq("role", "admin")
+      .eq("status", "approved");
+
+    if (countErr && isTableMissingError(countErr)) {
+      return {
+        id: "legacy-owner",
+        user_id: params.userId || null,
+        email: cleanEmail,
+        full_name: displayName,
+        role: "admin",
+        status: "approved",
+        created_at: nowIso,
+        updated_at: nowIso,
+        tableMissing: true,
+      };
+    }
+
+    const isFirstAdmin = (count ?? 0) === 0;
+    const role: TeamMemberRole = isFirstAdmin ? "admin" : "member";
+    const status: TeamMemberStatus = isFirstAdmin ? "approved" : "pending";
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("team_members")
+      .upsert(
+        [
+          {
+            user_id: params.userId || null,
+            email: cleanEmail,
+            full_name: displayName,
+            role,
+            status,
+          },
+        ],
+        { onConflict: "email" }
+      )
+      .select("*")
+      .single();
+
+    if (insertErr) {
+      throw new Error(insertErr.message);
+    }
+
+    return inserted as TeamMemberRecord;
+  }
+
+  // Fallback Local Mode
+  const members = getLocalTeamMembers();
+  const found = members.find((m) => m.email.toLowerCase() === cleanEmail);
+  if (found) return found;
+
+  const hasAdmin = members.some((m) => m.role === "admin" && m.status === "approved");
+  const newMember: TeamMemberRecord = {
+    id: crypto.randomUUID(),
+    user_id: params.userId || null,
+    email: cleanEmail,
+    full_name: displayName,
+    role: hasAdmin ? "member" : "admin",
+    status: hasAdmin ? "pending" : "approved",
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+  saveLocalTeamMembers([...members, newMember]);
+  return newMember;
+}
+
+export async function fetchAllTeamMembers(): Promise<{
+  members: TeamMemberRecord[];
+  tableMissing: boolean;
+}> {
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("team_members")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      if (isTableMissingError(error)) {
+        return { members: [], tableMissing: true };
+      }
+      throw new Error(error.message);
+    }
+
+    return { members: (data || []) as TeamMemberRecord[], tableMissing: false };
+  }
+
+  return { members: getLocalTeamMembers(), tableMissing: false };
+}
+
+export async function updateTeamMemberStatus(
+  id: string,
+  updates: { status?: TeamMemberStatus; role?: TeamMemberRole }
+): Promise<TeamMemberRecord> {
+  const nowIso = new Date().toISOString();
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("team_members")
+      .update({ ...updates, updated_at: nowIso })
+      .eq("id", id)
+      .select("*")
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data as TeamMemberRecord;
+  }
+
+  const members = getLocalTeamMembers();
+  let updated: TeamMemberRecord | null = null;
+  const next = members.map((m) => {
+    if (m.id !== id) return m;
+    updated = { ...m, ...updates, updated_at: nowIso };
+    return updated;
+  });
+  if (!updated) throw new Error("Anggota tim tidak ditemukan.");
+  saveLocalTeamMembers(next);
+  return updated;
+}
+
+export async function preApproveTeamMemberEmail(params: {
+  email: string;
+  fullName?: string;
+  role?: TeamMemberRole;
+}): Promise<TeamMemberRecord> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  const displayName = (params.fullName || cleanEmail.split("@")[0] || "Team").trim();
+  const role: TeamMemberRole = params.role || "member";
+  const nowIso = new Date().toISOString();
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from("team_members")
+      .upsert(
+        [
+          {
+            email: cleanEmail,
+            full_name: displayName,
+            role,
+            status: "approved",
+            updated_at: nowIso,
+          },
+        ],
+        { onConflict: "email" }
+      )
+      .select("*")
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data as TeamMemberRecord;
+  }
+
+  const members = getLocalTeamMembers();
+  const existing = members.find((m) => m.email.toLowerCase() === cleanEmail);
+  if (existing) {
+    return updateTeamMemberStatus(existing.id, { status: "approved", role });
+  }
+  const newMember: TeamMemberRecord = {
+    id: crypto.randomUUID(),
+    email: cleanEmail,
+    full_name: displayName,
+    role,
+    status: "approved",
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+  saveLocalTeamMembers([...members, newMember]);
+  return newMember;
+}
+
+export async function deleteTeamMember(id: string): Promise<void> {
+  if (supabase) {
+    const { error } = await supabase.from("team_members").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const members = getLocalTeamMembers();
+  saveLocalTeamMembers(members.filter((m) => m.id !== id));
+}
