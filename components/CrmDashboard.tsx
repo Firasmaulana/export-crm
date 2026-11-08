@@ -360,19 +360,17 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
   const handleDeleteAllBuyers = async () => {
     if (buyers.length === 0) return;
     const confirmed = window.confirm(
-      `Yakin ingin menghapus SEMUA (${buyers.length}) data buyer dari database secara permanen?`
+      `Yakin ingin menghapus SELURUH (${buyers.length}) data buyer dari database secara permanen?`
     );
     if (!confirmed) return;
 
     try {
       await deleteAllBuyers();
       setBuyers([]);
-      showToast("Seluruh data buyer berhasil dihapus.");
+      showToast("Seluruh data buyer berhasil dihapus dari database.");
     } catch (err) {
       showToast(
-        err instanceof Error
-          ? err.message
-          : "Gagal menghapus seluruh data buyer."
+        err instanceof Error ? err.message : "Gagal menghapus seluruh data."
       );
     }
   };
@@ -443,6 +441,18 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               </span>
             </button>
 
+            {user.role === "admin" && buyers.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteAllBuyers}
+                title="Hapus seluruh data buyer dari database"
+                className="btn-lustro-secondary text-rose-300 hover:text-rose-200 border-rose-400/25"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                <span className="hidden xl:inline">Hapus Semua</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={handleOpenAddBuyer}
@@ -451,18 +461,6 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               <Plus className="w-4 h-4" />
               <span>New Buyer</span>
             </button>
-
-            {buyers.length > 0 && (
-              <button
-                type="button"
-                onClick={handleDeleteAllBuyers}
-                title="Hapus seluruh data buyer di tabel"
-                className="btn-lustro-secondary text-rose-300 hover:text-rose-200"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden xl:inline">Hapus Semua</span>
-              </button>
-            )}
 
             <div className="h-5 w-[1px] bg-white/10 mx-1 hidden sm:block" />
 
