@@ -379,27 +379,29 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     <div className="lustro-bg min-h-screen flex flex-col">
       {/* Minimal Lustro Top Chrome */}
       <header className="sticky top-0 z-30 border-b border-white/8 bg-[#0a0e1a]/80 backdrop-blur-xl">
-        <div className="max-w-[1380px] mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="max-w-[1380px] mx-auto px-5 sm:px-8 h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <div className="lustro-logo" />
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 whitespace-nowrap">
               <span className="font-display font-semibold text-base tracking-tight text-white">
                 Export CRM
               </span>
-              <span className="text-indigo-300 font-light">/</span>
-              <span className="text-xs text-white/55 hidden sm:inline">
+              <span className="text-indigo-300 font-light hidden md:inline">
+                /
+              </span>
+              <span className="text-xs text-white/55 hidden md:inline">
                 Bumi Sari Lokal &amp; Karaya Living
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => setIsImportModalOpen(true)}
               className="btn-lustro-secondary"
             >
-              <Upload className="w-3.5 h-3.5 text-indigo-300" />
+              <Upload className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
               <span className="hidden md:inline">Import .xlsx</span>
             </button>
 
@@ -414,7 +416,7 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               })`}
               className="btn-lustro-secondary"
             >
-              <Calendar className="w-3.5 h-3.5 text-pink-300" />
+              <Calendar className="w-3.5 h-3.5 text-pink-300 shrink-0" />
               <span className="hidden sm:inline">
                 Export Mingguan ({
                   selectedTimeRange === "PREVIOUS_MONDAY"
@@ -435,45 +437,43 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               title="Export seluruh data yang tampil di tabel saat ini"
               className="btn-lustro-secondary"
             >
-              <Download className="w-3.5 h-3.5 text-white/70" />
+              <Download className="w-3.5 h-3.5 text-white/70 shrink-0" />
               <span className="hidden lg:inline">
                 Export ({filteredBuyers.length})
               </span>
             </button>
-
-            {user.role === "admin" && buyers.length > 0 && (
-              <button
-                type="button"
-                onClick={handleDeleteAllBuyers}
-                title="Hapus seluruh data buyer dari database"
-                className="btn-lustro-secondary text-rose-300 hover:text-rose-200 border-rose-400/25"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden xl:inline">Hapus Semua</span>
-              </button>
-            )}
 
             <button
               type="button"
               onClick={handleOpenAddBuyer}
               className="btn-lustro-primary"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 shrink-0" />
               <span>New Buyer</span>
             </button>
 
-            <div className="h-5 w-[1px] bg-white/10 mx-1 hidden sm:block" />
+            <div className="h-5 w-[1px] bg-white/10 mx-1 hidden sm:block shrink-0" />
+
+            {user.role === "admin" && buyers.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteAllBuyers}
+                title="Hapus seluruh data buyer dari database"
+                className="w-9 h-9 rounded-full bg-white/6 hover:bg-rose-500/20 border border-white/12 hover:border-rose-400/35 flex items-center justify-center text-rose-300/80 hover:text-rose-200 transition cursor-pointer shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
 
             <button
               type="button"
               onClick={() => setIsTeamModalOpen(true)}
               title="Kelola Akses Tim & Persetujuan (ACC) Akun"
-              className="btn-lustro-secondary relative"
+              className="w-9 h-9 rounded-full bg-white/6 hover:bg-white/14 border border-white/12 flex items-center justify-center text-amber-300 hover:text-amber-200 transition cursor-pointer relative shrink-0"
             >
-              <Users className="w-3.5 h-3.5 text-amber-300" />
-              <span className="hidden xl:inline">ACC Tim</span>
+              <Users className="w-4 h-4" />
               {pendingTeamCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-[#0a0e1a] font-mono font-bold text-[10px]">
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-amber-400 text-[#0a0e1a] font-mono font-bold text-[10px] flex items-center justify-center">
                   {pendingTeamCount}
                 </span>
               )}
@@ -483,7 +483,7 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               type="button"
               onClick={() => setIsSetupModalOpen(true)}
               title="Database Settings"
-              className="w-9 h-9 rounded-full bg-white/6 hover:bg-white/14 border border-white/12 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer"
+              className="w-9 h-9 rounded-full bg-white/6 hover:bg-white/14 border border-white/12 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer shrink-0"
             >
               <Settings2 className="w-4 h-4" />
             </button>
@@ -492,7 +492,7 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
               type="button"
               onClick={onSignOut}
               title={`Sign out (${user.email})`}
-              className="w-9 h-9 rounded-full bg-white/6 hover:bg-white/14 border border-white/12 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer"
+              className="w-9 h-9 rounded-full bg-white/6 hover:bg-white/14 border border-white/12 flex items-center justify-center text-white/70 hover:text-white transition cursor-pointer shrink-0"
             >
               <LogOut className="w-4 h-4" />
             </button>
