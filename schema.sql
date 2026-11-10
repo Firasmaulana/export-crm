@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.buyers (
   city TEXT DEFAULT '',
   website TEXT DEFAULT '',
   email TEXT DEFAULT '',
+  whatsapp TEXT DEFAULT '',
   pic_name TEXT DEFAULT '',
   linkedin_url TEXT DEFAULT '',
   social_media TEXT DEFAULT '',

@@ -18,6 +18,7 @@ export interface BuyerRecord {
   city: string;
   website: string;
   email: string;
+  whatsapp?: string;
   pic_name: string;
   linkedin_url: string;
   social_media: string;

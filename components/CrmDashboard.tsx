@@ -36,6 +36,7 @@ import {
   Linkedin,
   LogOut,
   Mail,
+  MessageCircle,
   Plus,
   Search,
   Settings2,
@@ -225,6 +226,7 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
           b.city,
           b.pic_name,
           b.email,
+          b.whatsapp || "",
           b.website,
           ...(b.sectors || []),
           ...(b.product_tags || []),
@@ -835,6 +837,11 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
                               {buyer.email}
                             </div>
                           )}
+                          {buyer.whatsapp && (
+                            <div className="text-[11px] text-emerald-400/80 truncate max-w-[190px] mt-0.5 font-mono">
+                              WA: {buyer.whatsapp}
+                            </div>
+                          )}
                         </td>
 
                         {/* Pipeline Status */}
@@ -892,13 +899,35 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
 
                             {buyer.email && (
                               <a
-                                href={`mailto:${buyer.email}`}
-                                title={buyer.email}
-                                className="p-1.5 rounded-lg text-white/45 hover:text-white hover:bg-white/8 transition"
+                                href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(
+                                  buyer.email
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Kirim email ke ${buyer.email} (Gmail)`}
+                                className="p-1.5 rounded-lg text-white/45 hover:text-indigo-300 hover:bg-white/8 transition"
                               >
                                 <Mail className="w-4 h-4" />
                               </a>
                             )}
+
+                            {buyer.whatsapp && (() => {
+                              const cleanDigits = buyer.whatsapp.replace(/\D/g, "");
+                              const waNumber = cleanDigits.startsWith("0")
+                                ? "62" + cleanDigits.slice(1)
+                                : cleanDigits;
+                              return (
+                                <a
+                                  href={`https://wa.me/${waNumber}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={`WhatsApp: ${buyer.whatsapp}`}
+                                  className="p-1.5 rounded-lg text-emerald-400/70 hover:text-emerald-300 hover:bg-emerald-500/10 transition"
+                                >
+                                  <MessageCircle className="w-4 h-4" />
+                                </a>
+                              );
+                            })()}
 
                             {buyer.linkedin_url && (
                               <a

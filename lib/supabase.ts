@@ -150,6 +150,7 @@ export interface UpsertBuyerInput {
   city: string;
   website: string;
   email: string;
+  whatsapp?: string;
   pic_name: string;
   linkedin_url: string;
   social_media: string;
@@ -203,6 +204,7 @@ export async function saveBuyerRecord(
         city: input.city.trim(),
         website: input.website.trim(),
         email: input.email.trim(),
+        whatsapp: (input.whatsapp || "").trim(),
         pic_name: input.pic_name.trim(),
         linkedin_url: input.linkedin_url.trim(),
         social_media: input.social_media.trim(),
@@ -238,6 +240,7 @@ export async function saveBuyerRecord(
         city: input.city.trim(),
         website: input.website.trim(),
         email: input.email.trim(),
+        whatsapp: (input.whatsapp || "").trim(),
         pic_name: input.pic_name.trim(),
         linkedin_url: input.linkedin_url.trim(),
         social_media: input.social_media.trim(),
@@ -291,6 +294,7 @@ export async function saveBuyerRecord(
       city: input.city.trim(),
       website: input.website.trim(),
       email: input.email.trim(),
+      whatsapp: (input.whatsapp || "").trim(),
       pic_name: input.pic_name.trim(),
       linkedin_url: input.linkedin_url.trim(),
       social_media: input.social_media.trim(),
@@ -331,6 +335,7 @@ export async function saveBuyerRecord(
         city: input.city.trim(),
         website: input.website.trim(),
         email: input.email.trim(),
+        whatsapp: (input.whatsapp || "").trim(),
         pic_name: input.pic_name.trim(),
         linkedin_url: input.linkedin_url.trim(),
         social_media: input.social_media.trim(),
@@ -402,6 +407,7 @@ export async function mergeImportedBuyersToDb(
         city: match.city || item.city,
         website: match.website || item.website,
         email: match.email || item.email,
+        whatsapp: match.whatsapp || item.whatsapp || "",
         pic_name: match.pic_name || item.pic_name,
         linkedin_url: match.linkedin_url || item.linkedin_url,
         social_media: match.social_media || item.social_media,

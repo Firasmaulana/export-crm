@@ -49,6 +49,7 @@ export default function BuyerFormModal({
   const [city, setCity] = useState("");
   const [website, setWebsite] = useState("");
   const [email, setEmail] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
   const [picName, setPicName] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [socialMedia, setSocialMedia] = useState("");
@@ -75,6 +76,7 @@ export default function BuyerFormModal({
       setCity(initialBuyer.city || "");
       setWebsite(initialBuyer.website || "");
       setEmail(initialBuyer.email || "");
+      setWhatsapp(initialBuyer.whatsapp || "");
       setPicName(initialBuyer.pic_name || "");
       setLinkedinUrl(initialBuyer.linkedin_url || "");
       setSocialMedia(initialBuyer.social_media || "");
@@ -93,6 +95,7 @@ export default function BuyerFormModal({
       setCity("");
       setWebsite("");
       setEmail("");
+      setWhatsapp("");
       setPicName("");
       setLinkedinUrl("");
       setSocialMedia("");
@@ -246,6 +249,7 @@ export default function BuyerFormModal({
         city,
         website,
         email,
+        whatsapp,
         pic_name: picName,
         linkedin_url: linkedinUrl,
         social_media: socialMedia,
@@ -311,7 +315,7 @@ export default function BuyerFormModal({
         )}
 
         {/* Primary Fields */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div>
             <label
               htmlFor="buyer-company-name"
@@ -370,6 +374,27 @@ export default function BuyerFormModal({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="contact@company.com"
+              className="input-lustro w-full"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="buyer-whatsapp"
+              className="block font-mono-label text-emerald-400 mb-2"
+            >
+              WhatsApp
+            </label>
+            <input
+              id="buyer-whatsapp"
+              name="whatsapp"
+              type="text"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              value={whatsapp}
+              onChange={(e) => setWhatsapp(e.target.value)}
+              placeholder="+62812... / +1..."
               className="input-lustro w-full"
             />
           </div>

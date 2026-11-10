@@ -218,6 +218,17 @@ export function parseAndDeduplicateExcelBuffer(
       const city = getColumnValue(row, ["Kota", "City"]);
       const website = getColumnValue(row, ["Website", "Web", "URL"]);
       const email = getColumnValue(row, ["Email", "E-mail", "Mail"]);
+      const whatsapp = getColumnValue(row, [
+        "WhatsApp",
+        "Whatsapp",
+        "WA",
+        "No WA",
+        "No. WA",
+        "Phone",
+        "Telepon",
+        "Telp",
+        "Mobile",
+      ]);
       const linkedin_url = getColumnValue(row, [
         "Linked in",
         "LinkedIn",
@@ -287,6 +298,7 @@ export function parseAndDeduplicateExcelBuffer(
         if (!existing.city && city) existing.city = city;
         if (!existing.website && website) existing.website = website;
         if (!existing.email && email) existing.email = email;
+        if (!existing.whatsapp && whatsapp) existing.whatsapp = whatsapp;
         if (!existing.pic_name && pic_name) existing.pic_name = pic_name;
         if (!existing.linkedin_url && linkedin_url)
           existing.linkedin_url = linkedin_url;
@@ -323,6 +335,7 @@ export function parseAndDeduplicateExcelBuffer(
           city,
           website,
           email,
+          whatsapp,
           pic_name,
           linkedin_url,
           social_media,
@@ -382,6 +395,7 @@ export function exportBuyersToExcel(
     "Pipeline Status": b.pipeline_status,
     PIC: b.pic_name,
     Email: b.email,
+    WhatsApp: b.whatsapp || "",
     Website: b.website,
     "Linked in": b.linkedin_url,
     "Social Media": b.social_media,
@@ -409,6 +423,7 @@ export function exportBuyersToExcel(
     { wch: 22 }, // Pipeline Status
     { wch: 22 }, // PIC
     { wch: 30 }, // Email
+    { wch: 20 }, // WhatsApp
     { wch: 34 }, // Website
     { wch: 42 }, // Linked in
     { wch: 20 }, // Social Media
