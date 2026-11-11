@@ -156,15 +156,16 @@ export default function BuyerFormModal({
     };
   }, [onClose]);
 
-  // Debounce 300ms Live Duplicate Check
+  // Debounce 300ms Live Duplicate Check (multi-variabel: Nama, Website, Email, WhatsApp)
   useEffect(() => {
     if (!isOpen) return;
 
     const trimmedName = companyName.trim();
     const trimmedWeb = website.trim();
     const trimmedEmail = email.trim();
+    const trimmedWa = whatsapp.trim();
 
-    if (!trimmedName && !trimmedWeb && !trimmedEmail) {
+    if (!trimmedName && !trimmedWeb && !trimmedEmail && !trimmedWa) {
       setDuplicateMatches([]);
       return;
     }
@@ -176,6 +177,7 @@ export default function BuyerFormModal({
             company_name: trimmedName,
             website: trimmedWeb,
             email: trimmedEmail,
+            whatsapp: trimmedWa,
             excludeId: editingBuyer?.id,
           },
           allBuyers
@@ -187,7 +189,7 @@ export default function BuyerFormModal({
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [companyName, website, email, editingBuyer?.id, allBuyers, isOpen]);
+  }, [companyName, website, email, whatsapp, editingBuyer?.id, allBuyers, isOpen]);
 
   const handleSwitchToExistingBuyer = (existing: BuyerRecord) => {
     setEditingBuyer(existing);
@@ -196,6 +198,7 @@ export default function BuyerFormModal({
     setCity((prev) => existing.city || prev);
     setWebsite((prev) => existing.website || prev);
     setEmail((prev) => existing.email || prev);
+    setWhatsapp((prev) => existing.whatsapp || prev);
     setPicName((prev) => existing.pic_name || prev);
     setLinkedinUrl((prev) => existing.linkedin_url || prev);
     setSocialMedia((prev) => existing.social_media || prev);

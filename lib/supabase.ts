@@ -5,6 +5,7 @@ import {
   findDuplicateBuyers,
   inferSectorsFromProductTags,
   normalizeCompanyName,
+  normalizePhoneDigits,
 } from "./deduplication";
 import { INITIAL_DEDUPLICATED_BUYERS } from "./seed-data";
 
@@ -83,21 +84,24 @@ export async function fetchAllBuyers(): Promise<BuyerRecord[]> {
 
 /**
  * Real-time query ke database (atau local fallback) untuk mengecek potensi duplikasi
- * berdasarkan Nama Perusahaan (normalized_name) maupun Website/Email (company_domain).
+ * berdasarkan Nama Perusahaan, Website/Email (company_domain), alamat Email, maupun Nomor WhatsApp.
  */
 export async function checkBuyerDuplicatesLive(
   input: {
     company_name?: string;
     website?: string;
     email?: string;
+    whatsapp?: string;
     excludeId?: string;
   },
   cachedBuyers?: BuyerRecord[]
 ) {
   const normName = normalizeCompanyName(input.company_name);
   const rootDomain = extractRootDomain(input.website, input.email);
+  const cleanEmail = (input.email || "").trim().toLowerCase();
+  const phoneDigits = normalizePhoneDigits(input.whatsapp);
 
-  if (!normName && !rootDomain) {
+  if (!normName && !rootDomain && !cleanEmail && !phoneDigits) {
     return [];
   }
 
@@ -118,13 +122,23 @@ export async function checkBuyerDuplicatesLive(
     if (rootDomain) {
       orFilters.push(`company_domain.eq.${rootDomain}`);
     }
+    if (cleanEmail) {
+      const safeEmail = cleanEmail.replace(/[,()*]/g, "").trim();
+      if (safeEmail) {
+        orFilters.push(`email.ilike.${safeEmail}`);
+      }
+    }
+    if (phoneDigits && phoneDigits.length >= 6) {
+      const lastDigits = phoneDigits.slice(-7);
+      orFilters.push(`whatsapp.ilike.%${lastDigits}%`);
+    }
 
     if (orFilters.length > 0) {
       const { data, error } = await supabase
         .from("buyers")
         .select("*")
         .or(orFilters.join(","))
-        .limit(10);
+        .limit(15);
 
       if (!error && data) {
         const combinedPool = [...data] as BuyerRecord[];
@@ -173,27 +187,80 @@ export async function saveBuyerRecord(
   }
 
   const company_domain = extractRootDomain(input.website, input.email) || null;
+  const cleanEmail = input.email.trim().toLowerCase();
+  const inputPhoneDigits = normalizePhoneDigits(input.whatsapp);
   const uniqueTags = Array.from(new Set(input.product_tags));
   const uniqueSectors = inferSectorsFromProductTags(uniqueTags, input.sectors);
   const nowIso = new Date().toISOString();
 
   if (supabase) {
-    // Jika tambah baru (tanpa id), cek apakah normalized_name atau company_domain sudah ada
+    // Jika tambah baru (tanpa id), cek multi-variabel (domain, email, nomor WA, atau nama + tanpa kontak berbeda)
     if (!input.id) {
       const orClauses = [`normalized_name.eq.${normalized_name}`];
       if (company_domain) {
         orClauses.push(`company_domain.eq.${company_domain}`);
       }
-      const { data: existing } = await supabase
+      if (cleanEmail) {
+        const safeEmail = cleanEmail.replace(/[,()*]/g, "").trim();
+        if (safeEmail) orClauses.push(`email.ilike.${safeEmail}`);
+      }
+      if (inputPhoneDigits && inputPhoneDigits.length >= 6) {
+        orClauses.push(`whatsapp.ilike.%${inputPhoneDigits.slice(-7)}%`);
+      }
+
+      const { data: candidates } = await supabase
         .from("buyers")
         .select("*")
         .or(orClauses.join(","))
-        .limit(1);
+        .limit(10);
 
-      if (existing && existing.length > 0) {
-        throw new Error(
-          `DUPLICATE_DETECTED: Perusahaan "${existing[0].company_name}" sudah terdaftar di database dengan nama/domain yang sama.`
-        );
+      if (candidates && candidates.length > 0) {
+        const exactMatch = (candidates as BuyerRecord[]).find((row) => {
+          const sameDomain = Boolean(
+            company_domain && row.company_domain === company_domain
+          );
+          const sameEmail = Boolean(
+            cleanEmail &&
+              (row.email || "").trim().toLowerCase() === cleanEmail
+          );
+          const rowPhoneDigits = normalizePhoneDigits(row.whatsapp);
+          const samePhone = Boolean(
+            inputPhoneDigits &&
+              rowPhoneDigits &&
+              inputPhoneDigits === rowPhoneDigits
+          );
+
+          if (sameDomain || sameEmail || samePhone) return true;
+
+          // Jika hanya normalized_name yang sama, pastikan BUKAN perusahaan berbeda
+          // (jika website, email, atau nomor WA terbukti berbeda, izinkan simpan!)
+          if (row.normalized_name === normalized_name) {
+            const hasDiffDomain = Boolean(
+              company_domain &&
+                row.company_domain &&
+                company_domain !== row.company_domain
+            );
+            const hasDiffEmail = Boolean(
+              cleanEmail &&
+                row.email &&
+                row.email.trim().toLowerCase() !== cleanEmail
+            );
+            const hasDiffPhone = Boolean(
+              inputPhoneDigits &&
+                rowPhoneDigits &&
+                inputPhoneDigits !== rowPhoneDigits
+            );
+            return !(hasDiffDomain || hasDiffEmail || hasDiffPhone);
+          }
+
+          return false;
+        });
+
+        if (exactMatch) {
+          throw new Error(
+            `DUPLICATE_DETECTED: Perusahaan "${exactMatch.company_name}" sudah terdaftar di database dengan Website/Email/WhatsApp atau nama yang sama.`
+          );
+        }
       }
 
       const payload = {
@@ -271,17 +338,42 @@ export async function saveBuyerRecord(
     }
   }
 
+  // Helper pengecekan multi-variabel untuk mode lokal maupun Supabase
+  const isDuplicateBuyer = (b: BuyerRecord) => {
+    const sameDomain = Boolean(
+      company_domain && b.company_domain === company_domain
+    );
+    const sameEmail = Boolean(
+      cleanEmail && (b.email || "").trim().toLowerCase() === cleanEmail
+    );
+    const rowPhoneDigits = normalizePhoneDigits(b.whatsapp);
+    const samePhone = Boolean(
+      inputPhoneDigits && rowPhoneDigits && inputPhoneDigits === rowPhoneDigits
+    );
+    if (sameDomain || sameEmail || samePhone) return true;
+
+    if (b.normalized_name === normalized_name) {
+      const hasDiffDomain = Boolean(
+        company_domain && b.company_domain && company_domain !== b.company_domain
+      );
+      const hasDiffEmail = Boolean(
+        cleanEmail && b.email && b.email.trim().toLowerCase() !== cleanEmail
+      );
+      const hasDiffPhone = Boolean(
+        inputPhoneDigits && rowPhoneDigits && inputPhoneDigits !== rowPhoneDigits
+      );
+      return !(hasDiffDomain || hasDiffEmail || hasDiffPhone);
+    }
+    return false;
+  };
+
   // Fallback Local Mode
   const current = getLocalBuyers();
   if (!input.id) {
-    const duplicate = current.find(
-      (b) =>
-        b.normalized_name === normalized_name ||
-        (company_domain && b.company_domain === company_domain)
-    );
+    const duplicate = current.find(isDuplicateBuyer);
     if (duplicate) {
       throw new Error(
-        `DUPLICATE_DETECTED: Perusahaan "${duplicate.company_name}" sudah terdaftar di database.`
+        `DUPLICATE_DETECTED: Perusahaan "${duplicate.company_name}" sudah terdaftar di database dengan Website/Email/WhatsApp atau nama yang sama.`
       );
     }
 
@@ -312,10 +404,7 @@ export async function saveBuyerRecord(
     return { record: newRecord, action: "created" };
   } else {
     const duplicate = current.find(
-      (b) =>
-        b.id !== input.id &&
-        (b.normalized_name === normalized_name ||
-          (company_domain && b.company_domain === company_domain))
+      (b) => b.id !== input.id && isDuplicateBuyer(b)
     );
     if (duplicate) {
       throw new Error(
@@ -387,8 +476,43 @@ export async function mergeImportedBuyersToDb(
     if (!normName) continue;
 
     const domain = extractRootDomain(item.website, item.email) || null;
-    const match =
-      byNormName.get(normName) || (domain ? byDomain.get(domain) : undefined);
+    const itemEmail = (item.email || "").trim().toLowerCase();
+    const itemPhone = normalizePhoneDigits(item.whatsapp);
+
+    // Cari kecocokan berdasarkan Domain dulu, lalu Email/WA, lalu Nama (hanya jika tidak ada kontak berbeda)
+    let match = domain ? byDomain.get(domain) : undefined;
+    if (!match && itemEmail) {
+      match = existingBuyers.find(
+        (b) => (b.email || "").trim().toLowerCase() === itemEmail
+      );
+    }
+    if (!match && itemPhone) {
+      match = existingBuyers.find(
+        (b) => normalizePhoneDigits(b.whatsapp) === itemPhone
+      );
+    }
+    if (!match) {
+      const nameCandidate = byNormName.get(normName);
+      if (nameCandidate) {
+        const hasDiffDomain = Boolean(
+          domain &&
+            nameCandidate.company_domain &&
+            domain !== nameCandidate.company_domain
+        );
+        const hasDiffEmail = Boolean(
+          itemEmail &&
+            nameCandidate.email &&
+            itemEmail !== nameCandidate.email.trim().toLowerCase()
+        );
+        const candPhone = normalizePhoneDigits(nameCandidate.whatsapp);
+        const hasDiffPhone = Boolean(
+          itemPhone && candPhone && itemPhone !== candPhone
+        );
+        if (!hasDiffDomain && !hasDiffEmail && !hasDiffPhone) {
+          match = nameCandidate;
+        }
+      }
+    }
 
     if (match) {
       // Merge product_tags, sectors, dan lengkapi kolom kosong

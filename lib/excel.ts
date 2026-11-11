@@ -5,6 +5,7 @@ import {
   inferSectorsFromProductTags,
   mapSheetNameToProductAndSector,
   normalizeCompanyName,
+  normalizePhoneDigits,
 } from "./deduplication";
 import { UpsertBuyerInput } from "./supabase";
 
@@ -277,10 +278,42 @@ export function parseAndDeduplicateExcelBuffer(
         : [mapping.sector];
 
       const company_domain = extractRootDomain(website, email) || null;
+      const cleanEmail = email.trim().toLowerCase();
+      const phoneDigits = normalizePhoneDigits(whatsapp);
 
-      const existing =
-        byNormName.get(normalized_name) ||
-        (company_domain ? byDomain.get(company_domain) : undefined);
+      let existing = company_domain ? byDomain.get(company_domain) : undefined;
+      if (!existing && cleanEmail) {
+        existing = Array.from(byNormName.values()).find(
+          (item) => (item.email || "").trim().toLowerCase() === cleanEmail
+        );
+      }
+      if (!existing && phoneDigits) {
+        existing = Array.from(byNormName.values()).find(
+          (item) => normalizePhoneDigits(item.whatsapp) === phoneDigits
+        );
+      }
+      if (!existing) {
+        const nameCandidate = byNormName.get(normalized_name);
+        if (nameCandidate) {
+          const hasDiffDomain = Boolean(
+            company_domain &&
+              nameCandidate.company_domain &&
+              company_domain !== nameCandidate.company_domain
+          );
+          const hasDiffEmail = Boolean(
+            cleanEmail &&
+              nameCandidate.email &&
+              cleanEmail !== nameCandidate.email.trim().toLowerCase()
+          );
+          const candPhone = normalizePhoneDigits(nameCandidate.whatsapp);
+          const hasDiffPhone = Boolean(
+            phoneDigits && candPhone && phoneDigits !== candPhone
+          );
+          if (!hasDiffDomain && !hasDiffEmail && !hasDiffPhone) {
+            existing = nameCandidate;
+          }
+        }
+      }
 
       if (existing) {
         duplicateRowsMergedCount++;

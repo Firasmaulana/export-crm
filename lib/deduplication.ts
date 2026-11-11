@@ -217,19 +217,43 @@ export function extractRootDomain(
 
 export interface DuplicateMatchResult {
   buyer: BuyerRecord;
-  matchType: "exact_name" | "exact_domain" | "similar_name";
+  matchType:
+    | "exact_domain"
+    | "exact_email"
+    | "exact_whatsapp"
+    | "exact_name_and_contact"
+    | "similar_name";
   reason: string;
 }
 
 /**
+ * Normalisasi nomor WhatsApp / Telepon ke bentuk digit murni internasional (tanpa spasi, +, -, dll.)
+ * Contoh: "+62 812-3456-7890" atau "081234567890" -> "6281234567890"
+ */
+export function normalizePhoneDigits(rawPhone: string | null | undefined): string {
+  if (!rawPhone) return "";
+  const digits = rawPhone.replace(/\D/g, "");
+  if (!digits || digits.length < 6) return "";
+  if (digits.startsWith("0")) {
+    return "62" + digits.slice(1);
+  }
+  return digits;
+}
+
+/**
  * Mengecek potensi duplikasi perusahaan secara komprehensif terhadap daftar buyer yang ada.
- * Digunakan baik untuk Live Check (Debounced 300ms) maupun saat proses Import Excel.
+ * Menggunakan multi-variabel:
+ * 1. Website / Root Domain
+ * 2. Alamat Email
+ * 3. Nomor WhatsApp
+ * 4. Nama Perusahaan (hanya dianggap duplikat pasti jika kontak/domain juga sama atau belum ada kontak berbeda)
  */
 export function findDuplicateBuyers(
   input: {
     company_name?: string;
     website?: string;
     email?: string;
+    whatsapp?: string;
     excludeId?: string;
   },
   existingBuyers: BuyerRecord[]
@@ -237,16 +261,20 @@ export function findDuplicateBuyers(
   const inputNormalizedName = normalizeCompanyName(input.company_name);
   const inputWebsiteDomain = extractDomainFromSingleInput(input.website, true);
   const inputEmailDomain = extractDomainFromSingleInput(input.email, true);
+  const inputCleanEmail = (input.email || "").trim().toLowerCase();
+  const inputPhoneDigits = normalizePhoneDigits(input.whatsapp);
   const inputPrimaryDomain = inputWebsiteDomain || inputEmailDomain;
 
-  if (!inputNormalizedName && !inputPrimaryDomain) {
+  if (
+    !inputNormalizedName &&
+    !inputPrimaryDomain &&
+    !inputCleanEmail &&
+    !inputPhoneDigits
+  ) {
     return [];
   }
 
   const results: DuplicateMatchResult[] = [];
-  const inputTokens = inputNormalizedName
-    ? inputNormalizedName.split(" ").filter((t) => t.length >= 2)
-    : [];
 
   for (const buyer of existingBuyers) {
     if (input.excludeId && buyer.id === input.excludeId) {
@@ -255,78 +283,134 @@ export function findDuplicateBuyers(
 
     const buyerNorm =
       buyer.normalized_name || normalizeCompanyName(buyer.company_name);
+    const buyerWebsiteDomain = extractDomainFromSingleInput(buyer.website, true);
     const buyerDomain =
       buyer.company_domain || extractRootDomain(buyer.website, buyer.email);
+    const buyerCleanEmail = (buyer.email || "").trim().toLowerCase();
+    const buyerPhoneDigits = normalizePhoneDigits(buyer.whatsapp);
 
-    // 1. Cek kecocokan persis pada normalized_name
-    if (inputNormalizedName && buyerNorm && inputNormalizedName === buyerNorm) {
-      results.push({
-        buyer,
-        matchType: "exact_name",
-        reason: `Nama ternormalisasi identik ("${buyerNorm}")`,
-      });
-      continue;
-    }
+    const matchedReasons: string[] = [];
 
-    // 2. Cek kecocokan persis pada root domain (website atau email)
-    if (
+    // Cek kecocokan Website / Domain korporat
+    const isSameDomain = Boolean(
       buyerDomain &&
-      ((inputWebsiteDomain && inputWebsiteDomain === buyerDomain) ||
-        (inputEmailDomain && inputEmailDomain === buyerDomain))
-    ) {
+        ((inputWebsiteDomain && inputWebsiteDomain === buyerDomain) ||
+          (inputEmailDomain && inputEmailDomain === buyerDomain))
+    );
+    const isSameExactWebsite = Boolean(
+      inputWebsiteDomain &&
+        buyerWebsiteDomain &&
+        inputWebsiteDomain === buyerWebsiteDomain
+    );
+    if (isSameExactWebsite || isSameDomain) {
+      matchedReasons.push(`Website/Domain sama ("${buyerDomain}")`);
+    }
+
+    // Cek kecocokan alamat Email persis
+    const isSameEmail = Boolean(
+      inputCleanEmail && buyerCleanEmail && inputCleanEmail === buyerCleanEmail
+    );
+    if (isSameEmail) {
+      matchedReasons.push(`Email sama ("${buyerCleanEmail}")`);
+    }
+
+    // Cek kecocokan nomor WhatsApp persis
+    const isSamePhone = Boolean(
+      inputPhoneDigits &&
+        buyerPhoneDigits &&
+        inputPhoneDigits === buyerPhoneDigits
+    );
+    if (isSamePhone) {
+      matchedReasons.push(`Nomor WhatsApp sama ("${buyer.whatsapp}")`);
+    }
+
+    const isSameNormName = Boolean(
+      inputNormalizedName && buyerNorm && inputNormalizedName === buyerNorm
+    );
+
+    // Cek apakah ada bukti bahwa kedua perusahaan ini MEMANG BERBEDA (website, email, atau nomor WA berbeda)
+    const hasDifferentWebsite = Boolean(
+      inputWebsiteDomain &&
+        buyerWebsiteDomain &&
+        inputWebsiteDomain !== buyerWebsiteDomain
+    );
+    const hasDifferentEmail = Boolean(
+      inputCleanEmail && buyerCleanEmail && inputCleanEmail !== buyerCleanEmail
+    );
+    const hasDifferentPhone = Boolean(
+      inputPhoneDigits &&
+        buyerPhoneDigits &&
+        inputPhoneDigits !== buyerPhoneDigits
+    );
+    const hasDistinctContactEvidence =
+      hasDifferentWebsite || hasDifferentEmail || hasDifferentPhone;
+
+    // 1. Jika Website/Domain, Email, atau WhatsApp cocok -> pasti terdeteksi
+    if (matchedReasons.length > 0) {
+      let matchType: DuplicateMatchResult["matchType"] = "exact_domain";
+      if (isSameEmail && !isSameDomain) matchType = "exact_email";
+      else if (isSamePhone && !isSameDomain && !isSameEmail)
+        matchType = "exact_whatsapp";
+      else if (isSameNormName) matchType = "exact_name_and_contact";
+
       results.push({
         buyer,
-        matchType: "exact_domain",
-        reason: `Root domain perusahaan sama ("${buyerDomain}")`,
+        matchType,
+        reason: matchedReasons.join(" & "),
       });
       continue;
     }
 
-    // 3. Cek kemiripan nama (Substring / Token Overlap) untuk Live Warning saat mengetik
-    if (inputNormalizedName.length >= 4 && buyerNorm.length >= 4) {
-      if (
-        buyerNorm.includes(inputNormalizedName) ||
-        inputNormalizedName.includes(buyerNorm)
-      ) {
-        results.push({
-          buyer,
-          matchType: "similar_name",
-          reason: `Nama perusahaan sangat mirip dengan "${buyer.company_name}"`,
-        });
-        continue;
-      }
+    // 2. Jika hanya namanya sama persis / mirip:
+    // HANYA tampilkan sebagai peringatan jika TIDAK ADA kontak (website/email/WA) yang terbukti berbeda
+    if (isSameNormName && !hasDistinctContactEvidence) {
+      results.push({
+        buyer,
+        matchType: "similar_name",
+        reason: `Nama perusahaan sama ("${buyer.company_name}"), silakan pastikan Website/Email/WA berbeda`,
+      });
+      continue;
+    }
 
-      if (inputTokens.length > 0) {
-        const buyerTokens = buyerNorm.split(" ").filter((t) => t.length >= 2);
+    if (
+      !hasDistinctContactEvidence &&
+      inputNormalizedName.length >= 5 &&
+      buyerNorm.length >= 5
+    ) {
+      const inputTokens = inputNormalizedName
+        .split(" ")
+        .filter((t) => t.length >= 2);
+      const buyerTokens = buyerNorm.split(" ").filter((t) => t.length >= 2);
+
+      // Hanya peringatkan kemiripan jika hampir seluruh kata kunci cocok (overlap >= 80%)
+      if (inputTokens.length > 0 && buyerTokens.length > 0) {
         const sharedTokens = inputTokens.filter((t) =>
-          buyerTokens.some((bt) => bt === t || (t.length >= 4 && bt.startsWith(t)))
+          buyerTokens.includes(t)
         );
         const overlapRatio =
           sharedTokens.length /
-          Math.max(1, Math.min(inputTokens.length, buyerTokens.length));
+          Math.max(inputTokens.length, buyerTokens.length);
 
-        // Jika kata pertama (nama inti brand) sama persis dan panjangnya >= 5 karakter, atau overlap >= 0.75
-        const firstTokenMatch =
-          inputTokens[0].length >= 5 &&
-          buyerTokens.length > 0 &&
-          inputTokens[0] === buyerTokens[0];
-
-        if (firstTokenMatch || (sharedTokens.length >= 2 && overlapRatio >= 0.75)) {
+        if (
+          sharedTokens.length >= 2 &&
+          overlapRatio >= 0.8
+        ) {
           results.push({
             buyer,
             matchType: "similar_name",
-            reason: `Kemiripan kata kunci nama perusahaan ("${sharedTokens.join(", ")}")`,
+            reason: `Kemiripan nama ("${buyer.company_name}") — isi Website/Email/WA berbeda untuk membedakan`,
           });
         }
       }
     }
   }
 
-  // Urutkan agar exact_name dan exact_domain tampil paling atas
   const priorityOrder: Record<DuplicateMatchResult["matchType"], number> = {
-    exact_name: 1,
+    exact_name_and_contact: 1,
     exact_domain: 2,
-    similar_name: 3,
+    exact_email: 3,
+    exact_whatsapp: 4,
+    similar_name: 5,
   };
 
   return results.sort(

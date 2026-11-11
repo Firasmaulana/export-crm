@@ -50,8 +50,9 @@ CREATE TABLE IF NOT EXISTS public.buyers (
 );
 
 -- 4. Database Unique Constraints & Indexes (Anti-Duplikasi Level Database)
--- Constraint unik ketat pada normalized_name
-CREATE UNIQUE INDEX IF NOT EXISTS idx_buyers_normalized_name_unique
+-- Index pada normalized_name (non-unique agar nama perusahaan mirip/sama dengan website/email berbeda tetap bisa disimpan)
+DROP INDEX IF EXISTS public.idx_buyers_normalized_name_unique;
+CREATE INDEX IF NOT EXISTS idx_buyers_normalized_name
   ON public.buyers (normalized_name);
 
 -- Constraint unik pada company_domain (hanya jika company_domain tidak kosong/null)
