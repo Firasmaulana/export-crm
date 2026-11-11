@@ -720,28 +720,47 @@ export async function ensureAndGetTeamMember(params: {
       return existing as TeamMemberRecord;
     }
 
-    // Cek apakah sudah ada admin yang approved di tabel team_members
-    const { count, error: countErr } = await supabase
-      .from("team_members")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "admin")
-      .eq("status", "approved");
+    // Cek apakah sudah ada admin yang approved di tabel team_members menggunakan RPC SECURITY DEFINER
+    // (PENTING: user yang belum di-ACC tidak boleh bisa menghitung/melihat admin lewat SELECT biasa karena RLS membatasi SELECT hanya untuk barisnya sendiri!)
+    let hasAdmin = true;
+    const { data: hasAdminData, error: rpcAdminErr } = await supabase.rpc(
+      "has_any_admin"
+    );
 
-    if (countErr && isTableMissingError(countErr)) {
-      return {
-        id: "legacy-owner",
-        user_id: params.userId || null,
-        email: cleanEmail,
-        full_name: displayName,
-        role: "admin",
-        status: "approved",
-        created_at: nowIso,
-        updated_at: nowIso,
-        tableMissing: true,
-      };
+    if (!rpcAdminErr && typeof hasAdminData === "boolean") {
+      hasAdmin = hasAdminData;
+    } else {
+      // Fallback jika RPC belum tersedia
+      const { count, error: countErr } = await supabase
+        .from("team_members")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "admin")
+        .eq("status", "approved");
+
+      if (countErr && isTableMissingError(countErr)) {
+        return {
+          id: "legacy-owner",
+          user_id: params.userId || null,
+          email: cleanEmail,
+          full_name: displayName,
+          role: "admin",
+          status: "approved",
+          created_at: nowIso,
+          updated_at: nowIso,
+          tableMissing: true,
+        };
+      }
+
+      // PENTING: Hanya anggap belum ada admin jika query tidak error DAN benar-benar 0;
+      // jika error, anggap hasAdmin = true (fail-closed) agar user baru TIDAK pernah jadi Admin!
+      if (!countErr) {
+        hasAdmin = (count ?? 0) > 0;
+      } else {
+        hasAdmin = true;
+      }
     }
 
-    const isFirstAdmin = (count ?? 0) === 0;
+    const isFirstAdmin = !hasAdmin;
 
     // Jika sedang mengecek sesi lama (bukan klik Sign Up baru) dan baris sudah tidak ada,
     // berarti akun ini telah dihapus oleh Admin! Jangan re-insert kembali.
@@ -779,6 +798,9 @@ export async function ensureAndGetTeamMember(params: {
   if (found) return found;
 
   const hasAdmin = members.some((m) => m.role === "admin" && m.status === "approved");
+  if (params.onlyCheckExisting && hasAdmin) {
+    throw new Error("ACCOUNT_DELETED_BY_ADMIN");
+  }
   const newMember: TeamMemberRecord = {
     id: crypto.randomUUID(),
     user_id: params.userId || null,

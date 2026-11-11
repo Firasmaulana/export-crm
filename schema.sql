@@ -374,6 +374,38 @@ AS $$
   );
 $$;
 
+GRANT EXECUTE ON FUNCTION public.has_any_admin() TO anon, authenticated;
+
+-- Proteksi ketat INSERT pada team_members agar user biasa TIDAK bisa mendaftarkan dirinya sendiri sebagai 'admin' atau 'approved' jika sudah ada Admin
+CREATE OR REPLACE FUNCTION public.enforce_team_member_insert_security()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF public.is_admin_member() THEN
+    RETURN NEW;
+  END IF;
+
+  IF NOT public.has_any_admin() THEN
+    NEW.role := 'admin';
+    NEW.status := 'approved';
+  ELSE
+    NEW.role := 'member';
+    NEW.status := 'pending';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_enforce_team_member_insert ON public.team_members;
+CREATE TRIGGER trg_enforce_team_member_insert
+  BEFORE INSERT ON public.team_members
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_team_member_insert_security();
+
 ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Team members select policy" ON public.team_members;

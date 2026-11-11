@@ -166,6 +166,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 session.user.email?.split("@")[0] ||
                 "Internal Team",
               mode: "supabase",
+              onlyCheckExisting: true,
             });
             if (mounted) setUser(resolved);
           } else {
@@ -240,6 +241,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 (data.user.user_metadata?.full_name as string) ||
                 cleanEmail.split("@")[0],
               mode: "supabase",
+              onlyCheckExisting: true,
             });
             setUser(resolved);
           }
@@ -266,6 +268,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                 email: signInData.user.email || cleanEmail,
                 name: displayName,
                 mode: "supabase",
+                onlyCheckExisting: false,
               });
               setUser(resolved);
               return;
@@ -289,6 +292,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               email: data.session.user.email || cleanEmail,
               name: displayName,
               mode: "supabase",
+              onlyCheckExisting: false,
             });
             setUser(resolved);
           } else {
@@ -297,6 +301,7 @@ export default function AuthGate({ children }: AuthGateProps) {
               email: cleanEmail,
               name: displayName,
               mode: "supabase",
+              onlyCheckExisting: false,
             });
             setInfoMsg(
               "Pendaftaran berhasil dikirim! Akun Anda menunggu persetujuan (ACC) Admin sebelum dapat mengakses database."
@@ -358,11 +363,11 @@ export default function AuthGate({ children }: AuthGateProps) {
   }, [user, resolveUserWithApproval]);
 
   // Cek otomatis secara real-time saat user tertahan di halaman "Menunggu Persetujuan Admin"
+  // MAUPUN saat user sudah masuk Dashboard (agar langsung ter-kick jika Admin menghapus/mencabut aksesnya)
   useEffect(() => {
-    if (!user || user.status === "approved") return;
+    if (!user) return;
 
-    const timer = setInterval(async () => {
-      if (document.visibilityState !== "visible") return;
+    const verifyMembership = async () => {
       const updated = await resolveUserWithApproval({
         email: user.email,
         name: user.name,
@@ -376,7 +381,22 @@ export default function AuthGate({ children }: AuthGateProps) {
       ) {
         setUser(updated);
       }
-    }, 3000);
+    };
+
+    const intervalMs = user.status === "approved" ? 4000 : 3000;
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        verifyMembership();
+      }
+    }, intervalMs);
+
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        verifyMembership();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("visibilitychange", handleFocus);
 
     let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
       null;
@@ -386,14 +406,8 @@ export default function AuthGate({ children }: AuthGateProps) {
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "team_members" },
-          async () => {
-            const updated = await resolveUserWithApproval({
-              email: user.email,
-              name: user.name,
-              mode: user.mode,
-              onlyCheckExisting: true,
-            });
-            setUser(updated);
+          () => {
+            verifyMembership();
           }
         )
         .subscribe();
@@ -401,6 +415,8 @@ export default function AuthGate({ children }: AuthGateProps) {
 
     return () => {
       clearInterval(timer);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("visibilitychange", handleFocus);
       if (channel && supabase) {
         supabase.removeChannel(channel);
       }
