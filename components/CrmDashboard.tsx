@@ -95,7 +95,14 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     try {
       const res = await fetchAllTeamMembers();
       const pending = res.members.filter((m) => m.status === "pending").length;
-      setPendingTeamCount(pending);
+      setPendingTeamCount((prev) => {
+        if (pending > prev && user.role === "admin") {
+          showToast(
+            `Ada ${pending} permintaan akun baru menunggu ACC Anda (klik ikon tim di kanan atas).`
+          );
+        }
+        return pending;
+      });
     } catch {
       // ignore
     }
@@ -105,7 +112,7 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     loadBuyers();
     loadPendingTeamCount();
 
-    // Sinkronisasi otomatis lintas perangkat (Realtime & saat tab kembali aktif)
+    // Sinkronisasi otomatis lintas perangkat (Realtime WebSocket + Fallback Polling + Tab Focus)
     const handleVisibility = () => {
       if (document.visibilityState === "visible") {
         loadBuyers();
@@ -113,12 +120,21 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
       }
     };
     window.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+
+    // Fallback polling ringan tiap 4 detik agar tetap real-time meskipun Supabase Replication belum dinyalakan
+    const pollingTimer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadPendingTeamCount();
+        loadBuyers();
+      }
+    }, 4000);
 
     let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
       null;
     if (supabase) {
       channel = supabase
-        .channel("buyers-realtime-sync")
+        .channel("crm-realtime-sync")
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "buyers" },
@@ -137,7 +153,9 @@ export default function CrmDashboard({ user, onSignOut }: CrmDashboardProps) {
     }
 
     return () => {
+      clearInterval(pollingTimer);
       window.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
       if (channel && supabase) {
         supabase.removeChannel(channel);
       }

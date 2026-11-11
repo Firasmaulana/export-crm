@@ -5,6 +5,7 @@ import {
   deleteTeamMember,
   fetchAllTeamMembers,
   preApproveTeamMemberEmail,
+  supabase,
   TeamMemberRecord,
   TeamMemberRole,
   TeamMemberStatus,
@@ -122,8 +123,8 @@ export default function TeamApprovalModal({
 
   const isAdmin = currentUserRole === "admin";
 
-  const loadMembers = async () => {
-    setLoading(true);
+  const loadMembers = async (silent = false) => {
+    if (!silent) setLoading(true);
     setErrorMsg(null);
     try {
       const res = await fetchAllTeamMembers();
@@ -131,11 +132,13 @@ export default function TeamApprovalModal({
       setTableMissing(res.tableMissing);
       onMembersChanged?.(res.members);
     } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : "Gagal memuat daftar anggota tim."
-      );
+      if (!silent) {
+        setErrorMsg(
+          err instanceof Error ? err.message : "Gagal memuat daftar anggota tim."
+        );
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -149,6 +152,39 @@ export default function TeamApprovalModal({
     } else if (!isOpen && dialog.open) {
       dialog.close();
     }
+  }, [isOpen]);
+
+  // Realtime listener & polling saat modal ACC Tim sedang terbuka
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        loadMembers(true);
+      }
+    }, 3000);
+
+    let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
+      null;
+    if (supabase) {
+      channel = supabase
+        .channel("team-modal-realtime")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "team_members" },
+          () => {
+            loadMembers(true);
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -333,7 +369,7 @@ export default function TeamApprovalModal({
             </pre>
             <button
               type="button"
-              onClick={loadMembers}
+              onClick={() => loadMembers()}
               className="btn-lustro-secondary py-2 px-4"
             >
               Saya Sudah Menjalankan SQL — Cek Ulang

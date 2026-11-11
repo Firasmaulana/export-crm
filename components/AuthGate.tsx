@@ -341,7 +341,7 @@ export default function AuthGate({ children }: AuthGateProps) {
     }
   };
 
-  const handleRefreshApproval = async () => {
+  const handleRefreshApproval = useCallback(async () => {
     if (!user) return;
     setCheckingApproval(true);
     try {
@@ -355,7 +355,57 @@ export default function AuthGate({ children }: AuthGateProps) {
     } finally {
       setCheckingApproval(false);
     }
-  };
+  }, [user, resolveUserWithApproval]);
+
+  // Cek otomatis secara real-time saat user tertahan di halaman "Menunggu Persetujuan Admin"
+  useEffect(() => {
+    if (!user || user.status === "approved") return;
+
+    const timer = setInterval(async () => {
+      if (document.visibilityState !== "visible") return;
+      const updated = await resolveUserWithApproval({
+        email: user.email,
+        name: user.name,
+        mode: user.mode,
+        onlyCheckExisting: true,
+      });
+      if (
+        !updated ||
+        updated.status !== user.status ||
+        updated.role !== user.role
+      ) {
+        setUser(updated);
+      }
+    }, 3000);
+
+    let channel: ReturnType<NonNullable<typeof supabase>["channel"]> | null =
+      null;
+    if (supabase) {
+      channel = supabase
+        .channel("authgate-approval-sync")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "team_members" },
+          async () => {
+            const updated = await resolveUserWithApproval({
+              email: user.email,
+              name: user.name,
+              mode: user.mode,
+              onlyCheckExisting: true,
+            });
+            setUser(updated);
+          }
+        )
+        .subscribe();
+    }
+
+    return () => {
+      clearInterval(timer);
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [user, resolveUserWithApproval]);
 
   if (user) {
     if (user.status === "approved") {

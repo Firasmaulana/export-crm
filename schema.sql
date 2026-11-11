@@ -427,6 +427,19 @@ CREATE POLICY "Allow approved team members access to buyers"
   USING (public.is_approved_member())
   WITH CHECK (public.is_approved_member());
 
+-- Aktifkan Supabase Realtime untuk tabel buyers & team_members
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.buyers;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+DO $$
+BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.team_members;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 -- ============================================================================
 -- 7. INITIAL SEED DATA (Hasil Deduplikasi Otomatis dari database.xlsx)
 -- Menggabungkan 55 baris dari 5 sheet (VOC, Extra Olive oil, Honey, Herbal Tea, Stevia)
