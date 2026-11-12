@@ -40,11 +40,23 @@ export default function AuthGate({ children }: AuthGateProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
+  const [honeypot, setHoneypot] = useState("");
+  const [challengeNumA, setChallengeNumA] = useState(() => Math.floor(Math.random() * 8) + 2);
+  const [challengeNumB, setChallengeNumB] = useState(() => Math.floor(Math.random() * 8) + 1);
+  const [challengeAnswer, setChallengeAnswer] = useState("");
+  const [failedAttempts, setFailedAttempts] = useState(0);
+  const [cooldownUntil, setCooldownUntil] = useState<number>(0);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [checkingApproval, setCheckingApproval] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
+
+  const regenerateChallenge = () => {
+    setChallengeNumA(Math.floor(Math.random() * 8) + 2);
+    setChallengeNumB(Math.floor(Math.random() * 8) + 1);
+    setChallengeAnswer("");
+  };
 
   const resolveUserWithApproval = useCallback(
     async (params: {
@@ -200,39 +212,48 @@ export default function AuthGate({ children }: AuthGateProps) {
     setErrorMsg(null);
     setInfoMsg(null);
 
+    // 1. Proteksi Honeypot Anti-Bot (field tersembunyi tidak boleh diisi oleh manusia)
+    if (honeypot.trim() !== "") {
+      setErrorMsg("Permintaan ditolak oleh sistem keamanan.");
+      return;
+    }
+
+    // 2. Cooldown jika terlalu banyak percobaan gagal (Anti Brute-Force)
+    if (Date.now() < cooldownUntil) {
+      const sisaDetik = Math.ceil((cooldownUntil - Date.now()) / 1000);
+      setErrorMsg(`Terlalu banyak percobaan gagal. Silakan tunggu ${sisaDetik} detik.`);
+      return;
+    }
+
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) {
       setErrorMsg("Masukkan alamat email Anda.");
       return;
     }
 
+    if (authTab === "signup") {
+      if (password.length < 8) {
+        setErrorMsg("Password pendaftaran minimal harus 8 karakter.");
+        return;
+      }
+      if (parseInt(challengeAnswer.trim(), 10) !== challengeNumA + challengeNumB) {
+        setErrorMsg("Jawaban verifikasi keamanan salah. Silakan hitung ulang.");
+        regenerateChallenge();
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       if (isSupabaseConfigured && supabase) {
         if (authTab === "signin") {
-          let { data, error } = await supabase.auth.signInWithPassword({
+          const { data, error } = await supabase.auth.signInWithPassword({
             email: cleanEmail,
             password,
           });
 
-          // Jika email belum terkonfirmasi karena daftar saat Confirm Email masih ON,
-          // coba konfirmasi otomatis lewat fungsi RPC database lalu login ulang
-          if (
-            error &&
-            error.message.toLowerCase().includes("email not confirmed")
-          ) {
-            await supabase.rpc("confirm_user_email_direct", {
-              p_email: cleanEmail,
-            });
-            const retry = await supabase.auth.signInWithPassword({
-              email: cleanEmail,
-              password,
-            });
-            data = retry.data;
-            error = retry.error;
-          }
-
           if (error) throw error;
+          setFailedAttempts(0);
           if (data.user) {
             const resolved = await resolveUserWithApproval({
               userId: data.user.id,
@@ -248,12 +269,26 @@ export default function AuthGate({ children }: AuthGateProps) {
         } else {
           const displayName = fullName.trim() || cleanEmail.split("@")[0];
 
-          // Coba daftar langsung lewat fungsi RPC database (bebas Email Rate Limit 100%)
+          // Coba daftar langsung lewat fungsi RPC database (bebas Email Rate Limit + Anti-Account Takeover)
           const { error: rpcErr } = await supabase.rpc("register_user_direct", {
             p_email: cleanEmail,
             p_password: password,
             p_full_name: displayName,
           });
+
+          if (rpcErr) {
+            // Jika error berasal dari validasi keamanan RPC (email sudah ada, rate limit, password < 8), langsung tolak!
+            const msgLower = (rpcErr.message || "").toLowerCase();
+            if (
+              msgLower.includes("sudah terdaftar") ||
+              msgLower.includes("terlalu banyak") ||
+              msgLower.includes("antrean") ||
+              msgLower.includes("minimal") ||
+              msgLower.includes("tidak valid")
+            ) {
+              throw new Error(rpcErr.message);
+            }
+          }
 
           if (!rpcErr) {
             const { data: signInData, error: signInErr } =
@@ -324,6 +359,15 @@ export default function AuthGate({ children }: AuthGateProps) {
         setUser(resolved);
       }
     } catch (err) {
+      const nextFailed = failedAttempts + 1;
+      setFailedAttempts(nextFailed);
+      if (nextFailed >= 5) {
+        setCooldownUntil(Date.now() + 30_000);
+        setFailedAttempts(0);
+      }
+      if (authTab === "signup") {
+        regenerateChallenge();
+      }
       const rawMsg =
         err instanceof Error
           ? err.message
@@ -332,11 +376,11 @@ export default function AuthGate({ children }: AuthGateProps) {
 
       if (lower.includes("rate limit")) {
         setErrorMsg(
-          "Batas pengiriman email konfirmasi Supabase tercapai (Email Rate Limit). Matikan fitur 'Confirm email' di Supabase Dashboard → Authentication → Providers → Email agar bisa mendaftar tanpa batas."
+          "Batas pengiriman email konfirmasi Supabase tercapai (Email Rate Limit)."
         );
       } else if (lower.includes("email not confirmed")) {
         setErrorMsg(
-          "Email belum dikonfirmasi. Matikan 'Confirm email' di Supabase Dashboard → Authentication → Providers → Email, atau jalankan query konfirmasi otomatis di SQL Editor."
+          "Email belum dikonfirmasi. Hubungi Admin untuk mengaktifkan akun."
         );
       } else {
         setErrorMsg(rawMsg);
@@ -566,6 +610,23 @@ export default function AuthGate({ children }: AuthGateProps) {
         )}
 
         <form onSubmit={handleSubmit} method="POST" className="space-y-4">
+          {/* Anti-bot honeypot field (hidden from real users) */}
+          <div
+            aria-hidden="true"
+            className="sr-only"
+          >
+            <label htmlFor="company-website">Company Website</label>
+            <input
+              id="company-website"
+              name="company_website"
+              type="text"
+              tabIndex={-1}
+              autoComplete="off"
+              value={honeypot}
+              onChange={(e) => setHoneypot(e.target.value)}
+            />
+          </div>
+
           {authTab === "signup" && (
             <div>
               <label
@@ -615,7 +676,10 @@ export default function AuthGate({ children }: AuthGateProps) {
               htmlFor="current-password"
               className="block font-mono-label text-white/60 mb-2"
             >
-              Password
+              Password{" "}
+              {authTab === "signup" && (
+                <span className="text-white/40 normal-case">(min. 8 karakter)</span>
+              )}
             </label>
             <div className="relative">
               <input
@@ -626,7 +690,7 @@ export default function AuthGate({ children }: AuthGateProps) {
                   authTab === "signin" ? "current-password" : "new-password"
                 }
                 required
-                minLength={6}
+                minLength={authTab === "signup" ? 8 : 6}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
@@ -647,6 +711,28 @@ export default function AuthGate({ children }: AuthGateProps) {
               </button>
             </div>
           </div>
+
+          {authTab === "signup" && (
+            <div>
+              <label
+                htmlFor="security-challenge"
+                className="block font-mono-label text-white/60 mb-2"
+              >
+                Verifikasi Keamanan: Berapa {challengeNumA} + {challengeNumB}?
+              </label>
+              <input
+                id="security-challenge"
+                name="security_challenge"
+                type="number"
+                inputMode="numeric"
+                required
+                value={challengeAnswer}
+                onChange={(e) => setChallengeAnswer(e.target.value)}
+                placeholder="Masukkan hasil penjumlahan"
+                className="input-lustro w-full"
+              />
+            </div>
+          )}
 
           <div className="pt-2">
             <button
@@ -670,8 +756,12 @@ export default function AuthGate({ children }: AuthGateProps) {
           <button
             type="button"
             onClick={() => {
-              setAuthTab(authTab === "signin" ? "signup" : "signin");
+              const nextTab = authTab === "signin" ? "signup" : "signin";
+              setAuthTab(nextTab);
               setErrorMsg(null);
+              if (nextTab === "signup") {
+                regenerateChallenge();
+              }
             }}
             className="text-xs text-white/50 hover:text-white transition cursor-pointer"
           >

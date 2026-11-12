@@ -73,11 +73,11 @@ CREATE TRIGGER on_auth_user_created_team_member AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_auth_user();
 
 CREATE OR REPLACE FUNCTION public.is_approved_member() RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.team_members WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', '')) AND status = 'approved');
+  SELECT EXISTS (SELECT 1 FROM public.team_members WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', '')) AND (user_id IS NULL OR user_id = auth.uid()) AND status = 'approved');
 $$;
 
 CREATE OR REPLACE FUNCTION public.is_admin_member() RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.team_members WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', '')) AND role = 'admin' AND status = 'approved');
+  SELECT EXISTS (SELECT 1 FROM public.team_members WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', '')) AND (user_id IS NULL OR user_id = auth.uid()) AND role = 'admin' AND status = 'approved');
 $$;
 
 CREATE OR REPLACE FUNCTION public.has_any_admin() RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
@@ -113,7 +113,14 @@ CREATE POLICY "Team members delete policy" ON public.team_members FOR DELETE TO 
 
 DROP POLICY IF EXISTS "Allow authenticated full access to buyers" ON public.buyers;
 DROP POLICY IF EXISTS "Allow approved team members access to buyers" ON public.buyers;
-CREATE POLICY "Allow approved team members access to buyers" ON public.buyers FOR ALL TO authenticated USING (public.is_approved_member()) WITH CHECK (public.is_approved_member());`;
+DROP POLICY IF EXISTS "Allow approved team members select buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved team members insert buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved team members update buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow admin delete buyers" ON public.buyers;
+CREATE POLICY "Allow approved team members select buyers" ON public.buyers FOR SELECT TO authenticated USING (public.is_approved_member());
+CREATE POLICY "Allow approved team members insert buyers" ON public.buyers FOR INSERT TO authenticated WITH CHECK (public.is_approved_member());
+CREATE POLICY "Allow approved team members update buyers" ON public.buyers FOR UPDATE TO authenticated USING (public.is_approved_member()) WITH CHECK (public.is_approved_member());
+CREATE POLICY "Allow admin delete buyers" ON public.buyers FOR DELETE TO authenticated USING (public.is_admin_member());`;
 
 export default function TeamApprovalModal({
   isOpen,

@@ -170,7 +170,7 @@ CREATE TRIGGER on_auth_user_created_team_member
   FOR EACH ROW
   EXECUTE FUNCTION public.handle_new_auth_user();
 
--- Fungsi Pendaftaran Langsung Tanpa Email Rate Limit Supabase (register_user_direct)
+-- Fungsi Pendaftaran Langsung Aman (Anti-Account Takeover + Anti-Bot Rate Limit)
 CREATE OR REPLACE FUNCTION public.register_user_direct(
   p_email TEXT,
   p_password TEXT,
@@ -185,17 +185,40 @@ DECLARE
   v_user_id UUID;
   v_clean_email TEXT := LOWER(TRIM(p_email));
   v_name TEXT := COALESCE(NULLIF(TRIM(p_full_name), ''), split_part(v_clean_email, '@', 1));
+  v_recent_pending_count INT;
+  v_total_pending_count INT;
 BEGIN
-  SELECT id INTO v_user_id FROM auth.users WHERE LOWER(email) = v_clean_email LIMIT 1;
+  -- 1. Validasi format email & panjang password minimal 8 karakter
+  IF v_clean_email IS NULL OR v_clean_email !~ '^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$' THEN
+    RAISE EXCEPTION 'Format alamat email tidak valid.';
+  END IF;
 
+  IF p_password IS NULL OR length(p_password) < 8 THEN
+    RAISE EXCEPTION 'Password minimal harus 8 karakter.';
+  END IF;
+
+  -- 2. ANTI-ACCOUNT TAKEOVER: Tolak keras jika email sudah terdaftar! Jangan pernah menimpa password akun yang sudah ada.
+  SELECT id INTO v_user_id FROM auth.users WHERE LOWER(email) = v_clean_email LIMIT 1;
   IF v_user_id IS NOT NULL THEN
-    UPDATE auth.users
-    SET
-      email_confirmed_at = COALESCE(email_confirmed_at, now()),
-      encrypted_password = extensions.crypt(p_password, extensions.gen_salt('bf')),
-      updated_at = now()
-    WHERE id = v_user_id;
-    RETURN v_user_id;
+    RAISE EXCEPTION 'Email sudah terdaftar. Silakan gunakan tab Sign In.';
+  END IF;
+
+  -- 3. ANTI-BOT RATE LIMITING:
+  -- Batasi maksimal 5 pendaftar pending dalam 10 menit terakhir & maksimal 20 total pending di antrean
+  SELECT COUNT(*) INTO v_recent_pending_count
+  FROM public.team_members
+  WHERE status = 'pending' AND created_at > now() - INTERVAL '10 minutes';
+
+  IF v_recent_pending_count >= 5 THEN
+    RAISE EXCEPTION 'Terlalu banyak permintaan pendaftaran dalam waktu singkat. Coba lagi dalam beberapa menit.';
+  END IF;
+
+  SELECT COUNT(*) INTO v_total_pending_count
+  FROM public.team_members
+  WHERE status = 'pending';
+
+  IF v_total_pending_count >= 20 THEN
+    RAISE EXCEPTION 'Antrean persetujuan akun sedang penuh. Hubungi Admin terlebih dahulu.';
   END IF;
 
   v_user_id := extensions.gen_random_uuid();
@@ -260,18 +283,8 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.register_user_direct(TEXT, TEXT, TEXT) TO anon, authenticated;
 
-CREATE OR REPLACE FUNCTION public.confirm_user_email_direct(p_email TEXT)
-RETURNS VOID
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-  UPDATE auth.users
-  SET email_confirmed_at = COALESCE(email_confirmed_at, now())
-  WHERE LOWER(email) = LOWER(TRIM(p_email));
-$$;
-
-GRANT EXECUTE ON FUNCTION public.confirm_user_email_direct(TEXT) TO anon, authenticated;
+-- Hapus fungsi publik confirm_user_email_direct agar tidak bisa dipanggil sembarangan dari browser
+DROP FUNCTION IF EXISTS public.confirm_user_email_direct(TEXT);
 
 -- Fungsi & Trigger Hapus Akun Permanen (Hapus dari team_members sekaligus auth.users)
 CREATE OR REPLACE FUNCTION public.handle_deleted_team_member()
@@ -331,6 +344,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.admin_delete_user_account(UUID, TEXT) TO authenticated;
 
 -- Fungsi helper SECURITY DEFINER untuk mengecek status ACC user yang sedang login
+-- Memverifikasi email JWT sekaligus user_id (jika tercatat) agar jauh lebih ketat
 CREATE OR REPLACE FUNCTION public.is_approved_member()
 RETURNS BOOLEAN
 LANGUAGE sql
@@ -341,6 +355,7 @@ AS $$
     SELECT 1
     FROM public.team_members
     WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+      AND (user_id IS NULL OR user_id = auth.uid())
       AND status = 'approved'
   );
 $$;
@@ -355,6 +370,7 @@ AS $$
     SELECT 1
     FROM public.team_members
     WHERE LOWER(email) = LOWER(COALESCE(auth.jwt()->>'email', ''))
+      AND (user_id IS NULL OR user_id = auth.uid())
       AND role = 'admin'
       AND status = 'approved'
   );
@@ -446,18 +462,35 @@ CREATE POLICY "Team members delete policy"
 
 -- Row Level Security (RLS) pada tabel buyers:
 -- HANYA user yang sudah berstatus APPROVED di team_members yang dapat mengakses data buyer!
+-- Penghapusan data buyer (DELETE) dibatasi khusus untuk anggota yang disetujui,
+-- dan untuk proteksi ekstra dapat dikunci jika diperlukan.
 ALTER TABLE public.buyers ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Allow authenticated full access to buyers" ON public.buyers;
 DROP POLICY IF EXISTS "Allow anon internal access to buyers" ON public.buyers;
 DROP POLICY IF EXISTS "Allow approved team members access to buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved select buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved insert buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow approved update buyers" ON public.buyers;
+DROP POLICY IF EXISTS "Allow admin delete buyers" ON public.buyers;
 
-CREATE POLICY "Allow approved team members access to buyers"
-  ON public.buyers
-  FOR ALL
-  TO authenticated
+CREATE POLICY "Allow approved select buyers"
+  ON public.buyers FOR SELECT TO authenticated
+  USING (public.is_approved_member());
+
+CREATE POLICY "Allow approved insert buyers"
+  ON public.buyers FOR INSERT TO authenticated
+  WITH CHECK (public.is_approved_member());
+
+CREATE POLICY "Allow approved update buyers"
+  ON public.buyers FOR UPDATE TO authenticated
   USING (public.is_approved_member())
   WITH CHECK (public.is_approved_member());
+
+-- Hapus data buyer di database dibatasi HANYA untuk Admin agar member/oknum tidak bisa menghapus database massal
+CREATE POLICY "Allow admin delete buyers"
+  ON public.buyers FOR DELETE TO authenticated
+  USING (public.is_admin_member());
 
 -- Aktifkan Supabase Realtime untuk tabel buyers & team_members
 DO $$
